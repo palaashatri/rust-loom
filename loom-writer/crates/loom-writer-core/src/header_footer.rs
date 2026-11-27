@@ -119,6 +119,8 @@ pub struct HeaderFooterConfig {
     pub page_number_format: PageNumberFormat,
     /// Whether the first page omits headers and footers (e.g. cover page).
     pub different_first_page: bool,
+    /// Optional diagonal watermark text rendered on every page.
+    pub watermark_text: String,
 }
 
 /// Which repeated page region a header/footer line occupies.
@@ -190,7 +192,11 @@ impl HeaderFooterConfig {
         };
         template
             .replace("{page}", &widest_number)
+            .replace("{PAGE}", &widest_number)
             .replace("{total}", &widest_number)
+            .replace("{NUMPAGES}", &widest_number)
+            .replace("{date}", "2026-11-25")
+            .replace("{DATE}", "2026-11-25")
     }
 
     /// Returns the canonical page-local line box and PDF baseline for `text`.
@@ -310,13 +316,40 @@ impl HeaderFooterConfig {
         if (self.different_first_page && page_num == 1) || text.is_empty() {
             return None;
         }
+        fn current_utc_date_iso() -> String {
+            let secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            let z = (secs / 86_400) as i64 + 719_468;
+            let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+            let doe = (z - era * 146_097) as u64;
+            let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+            let y = yoe as i64 + era * 400;
+            let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+            let mp = (5 * doy + 2) / 153;
+            let d = doy - (153 * mp + 2) / 5 + 1;
+            let m = if mp < 10 { mp + 3 } else { mp - 9 };
+            let y = if m <= 2 { y + 1 } else { y };
+            format!("{y:04}-{m:02}-{d:02}")
+        }
+
+        let page_str = self.page_number_format.format(page_num);
+        let total_str = total_pages.to_string();
+        let date_str = current_utc_date_iso();
         Some(
-            text.replace("{page}", &self.page_number_format.format(page_num))
-                .replace("{total}", &total_pages.to_string()),
+            text.replace("{page}", &page_str)
+                .replace("{PAGE}", &page_str)
+                .replace("{total}", &total_str)
+                .replace("{NUMPAGES}", &total_str)
+                .replace("{date}", &date_str)
+                .replace("{DATE}", &date_str),
         )
     }
 
     pub fn validate(&self) -> Result<(), &'static str> {
+        if self.write_content_json().len() > 32_768 {
+            return Err("header/footer settings exceed the 32768-byte limit");
+        }
         if self.header_text.len() > MAX_HEADER_FOOTER_TEXT_BYTES {
             return Err("header text exceeds the 2048-byte limit");
         }
@@ -362,14 +395,22 @@ impl HeaderFooterConfig {
     }
 
     pub(crate) fn write_content_json(&self) -> String {
-        format!(
-            "{{\"header_text\":{},\"footer_text\":{},\"alignment\":{},\"page_number_format\":{},\"different_first_page\":{}}}",
+        let mut s = format!(
+            "{{\"header_text\":{},\"footer_text\":{},\"alignment\":{},\"page_number_format\":{},\"different_first_page\":{}",
             pkg_json::escape(&self.header_text),
             pkg_json::escape(&self.footer_text),
             pkg_json::escape(&self.alignment),
             pkg_json::escape(self.page_number_format.name()),
             self.different_first_page,
-        )
+        );
+        if !self.watermark_text.is_empty() {
+            s.push_str(&format!(
+                ",\"watermark_text\":{}",
+                pkg_json::escape(&self.watermark_text)
+            ));
+        }
+        s.push('}');
+        s
     }
 
     pub(crate) fn from_content_json_value(value: &str) -> Result<Self, WriterError> {
@@ -401,6 +442,12 @@ impl HeaderFooterConfig {
                 }
                 "different_first_page" => {
                     config.different_first_page = bool_value(value, "different_first_page")?;
+                }
+                "watermark_text" => {
+                    config.watermark_text = string_value(value, "watermark_text")?;
+                }
+                "drop_cap_enabled" => {
+                    let _ = bool_value(value, "drop_cap_enabled")?;
                 }
                 _ => {
                     return Err(WriterError::Invalid(format!(

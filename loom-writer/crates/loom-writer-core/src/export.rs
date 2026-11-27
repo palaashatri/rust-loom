@@ -113,6 +113,7 @@ fn pdf_lines(
     body: &loom_pdf::TextStyle,
     column: f32,
     text_width_guard: f32,
+    flow: Option<&crate::DocumentFlow>,
 ) -> Result<Vec<PdfLine>, WriterError> {
     let mut lines = Vec::new();
     let numbers = doc.list_item_numbers();
@@ -219,6 +220,29 @@ fn pdf_lines(
         {
             shaped_lines.pop();
         }
+        if let Some(flow) = flow {
+            let flow_ranges: Vec<Range<usize>> = flow
+                .lines()
+                .iter()
+                .filter(|fl| fl.block_index == index)
+                .map(|fl| fl.start..fl.end)
+                .collect();
+            if !flow_ranges.is_empty()
+                && (flow_ranges.len() != shaped_lines.len()
+                    || flow_ranges
+                        .iter()
+                        .zip(&shaped_lines)
+                        .any(|(fr, (sr, _))| fr != sr))
+            {
+                let res_shaped = crate::layout::shape_block_lines(
+                    &pdf_block,
+                    &flow_ranges,
+                    style.size_pt,
+                    text_column,
+                );
+                shaped_lines = flow_ranges.into_iter().zip(res_shaped).collect();
+            }
+        }
         for (line_index, (range, shaped)) in shaped_lines.into_iter().enumerate() {
             if !range.is_empty() && shaped.is_none() {
                 return Err(WriterError::Invalid(format!(
@@ -294,8 +318,13 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
         - body_page_style.margin_left_pt
         - body_page_style.margin_right_pt)
         .max(0.0);
-    let lines = pdf_lines(doc, &body_page_style, &body, text_column, text_width_guard)?;
-    let flow = if doc.footnotes.is_empty() {
+    let has_floating_images = doc.blocks.iter().any(|b| {
+        b.image
+            .as_ref()
+            .and_then(|img| img.wrap)
+            .is_some_and(|w| w.mode != loom_objects::ImageWrapMode::Inline)
+    });
+    let flow = if doc.footnotes.is_empty() && !has_floating_images {
         None
     } else {
         Some(
@@ -312,6 +341,14 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
             .map_err(|error| WriterError::Invalid(format!("PDF footnote layout: {error}")))?,
         )
     };
+    let lines = pdf_lines(
+        doc,
+        &body_page_style,
+        &body,
+        text_column,
+        text_width_guard,
+        flow.as_ref(),
+    )?;
     let mut pdf = PdfDocument::new();
     let appearance = doc.page.appearance;
     let add_page = |pdf: &mut PdfDocument| -> Result<loom_pdf::PageIndex, WriterError> {
@@ -344,6 +381,7 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
     // A page break (form feed) ends its line; the next line starts a page.
     let mut break_pending = false;
     let mut flow_line_index = 0usize;
+    let mut deferred_in_front = Vec::new();
     for line in lines {
         let flow_line = if let Some(flow) = &flow {
             let flow_line = flow.lines().get(flow_line_index).ok_or_else(|| {
@@ -397,7 +435,9 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
             } => {
                 break_pending = *page_break_after;
                 let text_start = block.text_start_pt(&page_style);
-                let text_origin_x = page_style.margin_left_pt + text_start;
+                let text_origin_x = page_style.margin_left_pt
+                    + text_start
+                    + flow_line.map_or(0.0, |fl| fl.x_offset_pt);
                 let marker_x = text_origin_x - LIST_MARKER_GAP_PT - pdf_text_width(marker, style);
                 let marker_shape = if marker.is_empty() {
                     None
@@ -568,6 +608,30 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
                         line.block
                     ))
                 })?;
+                let z_order = pdf_image_z_order(image);
+                let is_floating = image
+                    .wrap
+                    .is_some_and(|w| w.mode != loom_objects::ImageWrapMode::Inline);
+                let (draw_x, draw_y, draw_w, draw_h) = if is_floating {
+                    if let (Some(flow_ref), Some(fl)) = (&flow, flow_line) {
+                        let page_x = flow_ref.page_bounds().get(fl.page).map_or(0.0, |b| b.x);
+                        (fl.bounds.x - page_x, y, fl.bounds.width, fl.bounds.height)
+                    } else {
+                        (
+                            page_style.margin_left_pt + indent + shift,
+                            y,
+                            *width,
+                            *height,
+                        )
+                    }
+                } else {
+                    (
+                        page_style.margin_left_pt + indent + shift,
+                        y,
+                        *width,
+                        *height,
+                    )
+                };
                 let image = pdf_image(image).map_err(|error| {
                     WriterError::Invalid(format!(
                         "PDF export image block {} ({}): {}",
@@ -577,13 +641,21 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
                     ))
                 })?;
                 let id = pdf.add_image(image);
-                let x = page_style.margin_left_pt + indent + shift;
-                pdf.draw_image_with_transform(
-                    page,
-                    id,
-                    (*width, *height),
-                    [1.0, 0.0, 0.0, -1.0, x, y],
-                );
+                if z_order == 2 {
+                    deferred_in_front.push((
+                        page,
+                        id,
+                        (draw_w, draw_h),
+                        [1.0, 0.0, 0.0, -1.0, draw_x, draw_y],
+                    ));
+                } else {
+                    pdf.draw_image_with_transform(
+                        page,
+                        id,
+                        (draw_w, draw_h),
+                        [1.0, 0.0, 0.0, -1.0, draw_x, draw_y],
+                    );
+                }
             }
         }
         if flow.is_none() {
@@ -608,7 +680,25 @@ pub fn export_pdf(doc: &WriterDocument) -> Result<Vec<u8>, WriterError> {
         }
         footnote_export::draw_body_lines(&mut pdf, &mut fonts, &pages, flow, doc, &page_style)?;
     }
+    for (page, id, size, transform) in deferred_in_front {
+        pdf.draw_image_with_transform(page, id, size, transform);
+    }
     header_footer_export::draw(&mut pdf, &pages, doc, &page_style)?;
+    if !doc.header_footer.watermark_text.is_empty() {
+        let wm_style = loom_pdf::TextStyle {
+            size_pt: 36.0,
+            bold: true,
+            fill_rgb: (0.82, 0.82, 0.82),
+            ..Default::default()
+        };
+        let wm_w =
+            crate::text_metrics::pdf_text_width(&doc.header_footer.watermark_text, &wm_style);
+        let x = ((page_style.width_pt - wm_w) / 2.0).max(page_style.margin_left_pt);
+        let y = page_style.height_pt / 2.0;
+        for &page in &pages {
+            pdf.draw_text(page, x, y, &doc.header_footer.watermark_text, &wm_style);
+        }
+    }
     Ok(pdf.serialize())
 }
 

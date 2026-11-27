@@ -88,7 +88,7 @@ impl DecodedCache {
 }
 
 /// Where a picture was drawn last time: position, size and which bytes.
-type Placed = (u32, u32, u32, u32, usize);
+type Placed = (u32, u32, u32, u32, usize, u8);
 
 thread_local! {
     static DECODED: RefCell<DecodedCache> =
@@ -196,6 +196,7 @@ pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart], selected: Option
                 p.width.to_bits(),
                 p.height.to_bits(),
                 key(p),
+                p.z_order.rank(),
             )
         })
         .collect();
@@ -224,6 +225,7 @@ pub(crate) fn publish(app: &WriterApp, parts: &[PageImagePart], selected: Option
                         source: result.image,
                         label: label.into(),
                         selected: false,
+                        z_order: p.z_order.rank() as i32,
                     }
                 })
                 .collect();

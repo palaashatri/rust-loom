@@ -14,6 +14,7 @@ fn pdf_repeats_page_fields_and_suppresses_the_first_page() {
         alignment: "center".into(),
         page_number_format: PageNumberFormat::RomanUpper,
         different_first_page: true,
+        ..Default::default()
     };
 
     let pdf = crate::export_pdf(&document).expect("PDF export with header and footer");

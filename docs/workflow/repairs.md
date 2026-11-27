@@ -87,7 +87,7 @@ Full card text (original finding, steps, evidence) lives in [docs/archive/AGENTS
 - **GOV-06** Meet WCAG 2.2 target-size and dragging criteria — OPEN
 - **GOV-07** Retire macOS x86-64 and pin the build toolchain — OPEN
 - **GOV-08** Make releases commercially shippable under the CRA — OPEN
-- **GOV-09** Define shared rich-text semantics across Writer, Sheets, and Present — OPEN
+- **GOV-09** Define shared rich-text semantics across Writer, Sheets, and Present — IN_PROGRESS (`loom-text/src/capabilities.rs`, `loom-clipboard/src/rich_html.rs` implemented 2026-11-25)
 - **GOV-10** Make open OOXML formats the primary user-facing save formats — OPEN
 
 ### Current supervisor pending list — 2026-10-18

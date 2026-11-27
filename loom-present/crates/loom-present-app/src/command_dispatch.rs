@@ -165,6 +165,9 @@ pub(crate) fn dispatch_command(app: &PresentApp, id: &str) -> bool {
         "view.inspector" => app.invoke_toggle_inspector(),
         "view.preview" => app.invoke_toggle_preview_mode(),
         "view.presenter" => app.invoke_open_presenter(),
+        "view.slide_sorter" => app.global::<ElementInk>().invoke_toggle_slide_sorter(),
+        "format.copy_style" => app.global::<ElementInk>().invoke_copy_format_style(),
+        "format.apply_style" => app.global::<ElementInk>().invoke_apply_format_style(),
         "view.zoom_in" => {
             let z = (app.get_zoom_index() - 1).max(0);
             app.set_zoom_index(z);

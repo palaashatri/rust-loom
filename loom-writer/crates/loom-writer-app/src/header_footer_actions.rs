@@ -30,7 +30,7 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
         global.on_apply(move || {
             let Some(app) = app_ref.upgrade() else { return };
             let global = app.global::<WriterHeaderFooterState>();
-            let config = match dialog_config(&global) {
+            let config = match dialog_config(&global, &state.current.borrow().header_footer) {
                 Ok(config) => config,
                 Err(error) => {
                     global.set_error(error.into());
@@ -66,7 +66,10 @@ pub(crate) fn register(app: &WriterApp, state: &Rc<GuiState>) {
     }
 }
 
-fn dialog_config(global: &WriterHeaderFooterState) -> Result<HeaderFooterConfig, String> {
+fn dialog_config(
+    global: &WriterHeaderFooterState,
+    current: &HeaderFooterConfig,
+) -> Result<HeaderFooterConfig, String> {
     let alignment = match global.get_alignment() {
         0 => "",
         1 => "center",
@@ -80,13 +83,12 @@ fn dialog_config(global: &WriterHeaderFooterState) -> Result<HeaderFooterConfig,
         3 => PageNumberFormat::Alphabetical,
         _ => return Err("Choose a page number format".into()),
     };
-    let config = HeaderFooterConfig {
-        header_text: global.get_header_text().to_string(),
-        footer_text: global.get_footer_text().to_string(),
-        alignment: alignment.into(),
-        page_number_format,
-        different_first_page: global.get_different_first_page(),
-    };
+    let mut config = current.clone();
+    config.header_text = global.get_header_text().to_string();
+    config.footer_text = global.get_footer_text().to_string();
+    config.alignment = alignment.into();
+    config.page_number_format = page_number_format;
+    config.different_first_page = global.get_different_first_page();
     config.validate().map_err(str::to_owned)?;
     Ok(config)
 }

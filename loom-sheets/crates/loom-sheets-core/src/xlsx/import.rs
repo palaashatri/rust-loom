@@ -240,7 +240,10 @@ fn fill_sheet(
     for column in &parsed.columns {
         if column.hidden {
             warnings.insert(XlsxImportWarning::HiddenContent);
-            continue;
+            let hidden_last = column.last.min(16_384);
+            for col in column.first..=hidden_last {
+                sheet.hidden_cols.insert(col);
+            }
         }
         if let (true, Some(width)) = (column.custom, column.width) {
             let last = column
@@ -257,7 +260,7 @@ fn fill_sheet(
     for row in &parsed.rows {
         if row.hidden {
             warnings.insert(XlsxImportWarning::HiddenContent);
-            continue;
+            sheet.hidden_rows.insert(row.row);
         }
         if let Some(height) = row.height {
             if row.custom || (height - default_points).abs() > 0.01 {

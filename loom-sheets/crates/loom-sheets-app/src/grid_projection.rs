@@ -62,11 +62,22 @@ pub(crate) fn materialized_rows(sheet: &Sheet, viewport: SheetViewport) -> Vec<u
     rows
 }
 
-/// The worksheet columns inside `viewport`'s column span.
-pub(crate) fn materialized_cols(viewport: SheetViewport) -> Vec<u32> {
+/// The non-hidden worksheet columns inside `viewport`'s column span.
+pub(crate) fn materialized_cols(sheet: &Sheet, viewport: SheetViewport) -> Vec<u32> {
     let start = viewport.first_col;
     let end = start.saturating_add(viewport.visible_cols.max(1));
-    (start..end).collect()
+    let mut cols = Vec::new();
+    let mut cursor = start;
+    for &hidden in sheet.hidden_cols.range(start..end) {
+        if hidden > cursor {
+            cols.extend(cursor..hidden);
+        }
+        cursor = hidden.saturating_add(1);
+    }
+    if cursor < end {
+        cols.extend(cursor..end);
+    }
+    cols
 }
 
 pub(crate) fn project_sheet_grid_with_values(
@@ -75,7 +86,7 @@ pub(crate) fn project_sheet_grid_with_values(
     viewport: SheetViewport,
 ) -> ProjectedSheetGrid {
     let mat_rows = materialized_rows(sheet, viewport);
-    let mat_cols = materialized_cols(viewport);
+    let mat_cols = materialized_cols(sheet, viewport);
     let rows: Vec<i32> = mat_rows.iter().map(|&row| row as i32).collect();
     let cols: Vec<i32> = mat_cols.iter().map(|&col| col as i32).collect();
     let column_headers = mat_cols
@@ -119,11 +130,23 @@ pub(crate) fn project_sheet_grid_with_values(
                 CellAlignment::Right => 2,
             };
             let formatted_val = style.format_value(&raw_val);
-            let display_val = style.format_value_fit(
-                &raw_val,
-                sheet.col_width(col),
-                formatting::effective_font_size(style) as f32,
-            );
+            let display_val = if crate::parity_actions::show_formulas_enabled() {
+                if let Some(raw) = sheet.raw(cell).filter(|r| r.starts_with('=')) {
+                    raw.to_string()
+                } else {
+                    style.format_value_fit(
+                        &raw_val,
+                        sheet.col_width(col),
+                        formatting::effective_font_size(style) as f32,
+                    )
+                }
+            } else {
+                style.format_value_fit(
+                    &raw_val,
+                    sheet.col_width(col),
+                    formatting::effective_font_size(style) as f32,
+                )
+            };
             let effective = sheet.effective_style(cell, &formatted_val);
             cell_labels.push(accessible_cell_label(cell, sheet.raw(cell), &raw_val));
             cells.push(display_val);
@@ -409,13 +432,16 @@ pub(crate) fn grid_geometry_fit(
     // unscaled pixels (see `viewport_from_app`).
     let default_col_width = fit_col_width * zoom;
     let default_row_height = GRID_ROW_HEIGHT * zoom;
-    let scaled_cols: BTreeMap<u32, f32> = sheet
+    let mut scaled_cols: BTreeMap<u32, f32> = sheet
         .col_widths
         .iter()
         .map(|(&col, &width)| (col, width * zoom))
         .collect();
+    for &col in &sheet.hidden_cols {
+        scaled_cols.insert(col, 0.0);
+    }
     let scaled_rows = scaled_row_heights(sheet, zoom);
-    let mat_cols = materialized_cols(viewport);
+    let mat_cols = materialized_cols(sheet, viewport);
     let mat_rows = materialized_rows(sheet, viewport);
     let column_widths: Vec<f32> = mat_cols
         .iter()
@@ -427,7 +453,7 @@ pub(crate) fn grid_geometry_fit(
         .collect();
     let visible_width = column_widths.iter().sum();
     let visible_height = row_heights.iter().sum();
-    let content_width = if sheet.col_widths.is_empty() {
+    let content_width = if scaled_cols.is_empty() {
         dimensions.cols as f32 * default_col_width
     } else {
         dimension_extent(dimensions.cols, default_col_width, &scaled_cols)

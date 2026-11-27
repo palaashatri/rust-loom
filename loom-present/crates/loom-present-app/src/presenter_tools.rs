@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-#[cfg(test)]
-use loom_present_core::AnnotationStroke;
-use loom_present_core::{AnnotationDrawingTool, SlideAnnotationOverlay};
+use loom_present_core::{AnnotationDrawingTool, AnnotationStroke, SlideAnnotationOverlay};
 
 /// Live presenter rehearsal state: annotation tool, per-slide strokes, laser pointer, and numeric jump buffer.
 #[derive(Debug, Default)]
@@ -12,6 +10,8 @@ pub struct PresenterToolState {
     pub jump_buffer: String,
     pub laser_pos: Option<(f32, f32)>,
 }
+
+const ERASER_RADIUS_NORM: f32 = 0.03;
 
 impl PresenterToolState {
     pub fn set_tool(&mut self, tool: AnnotationDrawingTool) {
@@ -37,14 +37,13 @@ impl PresenterToolState {
         Some(one_based - 1)
     }
 
-    #[cfg(test)]
     pub fn begin_stroke(&mut self, slide_index: usize, x: f32, y: f32) {
         if self.active_tool == AnnotationDrawingTool::LaserPointer {
             self.laser_pos = Some((x, y));
             return;
         }
         if self.active_tool == AnnotationDrawingTool::Eraser {
-            self.erase_near(slide_index, x, y, 16.0);
+            self.erase_near(slide_index, x, y, ERASER_RADIUS_NORM);
             return;
         }
         let (color, width) = match self.active_tool {
@@ -64,14 +63,13 @@ impl PresenterToolState {
         });
     }
 
-    #[cfg(test)]
     pub fn extend_stroke(&mut self, slide_index: usize, x: f32, y: f32) {
         if self.active_tool == AnnotationDrawingTool::LaserPointer {
             self.laser_pos = Some((x, y));
             return;
         }
         if self.active_tool == AnnotationDrawingTool::Eraser {
-            self.erase_near(slide_index, x, y, 16.0);
+            self.erase_near(slide_index, x, y, ERASER_RADIUS_NORM);
             return;
         }
         if let Some(overlay) = self.overlays.get_mut(&slide_index) {
@@ -81,7 +79,6 @@ impl PresenterToolState {
         }
     }
 
-    #[cfg(test)]
     pub fn erase_near(&mut self, slide_index: usize, x: f32, y: f32, radius: f32) {
         let r2 = radius * radius;
         if let Some(overlay) = self.overlays.get_mut(&slide_index) {
@@ -124,5 +121,19 @@ mod tests {
         state.set_tool(AnnotationDrawingTool::Eraser);
         state.erase_near(0, 12.0, 22.0, 10.0);
         assert!(state.overlays[&0].strokes.is_empty());
+    }
+
+    #[test]
+    fn normalized_eraser_only_removes_nearby_stroke() {
+        let mut state = PresenterToolState::default();
+        state.set_tool(AnnotationDrawingTool::Pen);
+        state.begin_stroke(0, 0.1, 0.1);
+        state.begin_stroke(0, 0.8, 0.8);
+        assert_eq!(state.overlays[&0].strokes.len(), 2);
+
+        state.set_tool(AnnotationDrawingTool::Eraser);
+        state.begin_stroke(0, 0.11, 0.11);
+        assert_eq!(state.overlays[&0].strokes.len(), 1);
+        assert_eq!(state.overlays[&0].strokes[0].points[0], (0.8, 0.8));
     }
 }

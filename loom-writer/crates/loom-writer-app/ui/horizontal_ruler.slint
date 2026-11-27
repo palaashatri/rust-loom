@@ -1,0 +1,50 @@
+import { Theme } from "theme.slint";
+
+/// Horizontal page ruler showing left/right margins and tick marks in points.
+export component HorizontalRuler inherits Rectangle {
+    in property <length> page-width: 612px;
+    in property <length> margin-left: 72px;
+    in property <length> margin-right: 72px;
+    in property <float> zoom: 1.0;
+
+    height: 20px;
+    background: Theme.palette().surface;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+    clip: true;
+
+    Rectangle {
+        x: (parent.width - root.page-width * root.zoom) / 2;
+        width: root.page-width * root.zoom;
+        height: parent.height;
+        background: Theme.palette().canvas;
+
+        // Left margin shading
+        Rectangle {
+            x: 0px;
+            width: root.margin-left * root.zoom;
+            height: parent.height;
+            background: Theme.palette().surface-sunken;
+        }
+        // Right margin shading
+        Rectangle {
+            x: parent.width - root.margin-right * root.zoom;
+            width: root.margin-right * root.zoom;
+            height: parent.height;
+            background: Theme.palette().surface-sunken;
+        }
+        // Margin markers
+        Rectangle {
+            x: root.margin-left * root.zoom;
+            width: 2px;
+            height: parent.height;
+            background: Theme.palette().accent;
+        }
+        Rectangle {
+            x: parent.width - root.margin-right * root.zoom - 2px;
+            width: 2px;
+            height: parent.height;
+            background: Theme.palette().accent;
+        }
+    }
+}

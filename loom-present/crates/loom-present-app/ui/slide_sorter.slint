@@ -1,0 +1,80 @@
+import { Theme } from "theme.slint";
+import { LoomButton } from "foundation.slint";
+import { ThumbRows, MiniSlide } from "slide_thumbs.slint";
+
+/// Slide Sorter grid view showing all slides with selection and reorder controls.
+export component SlideSorterGrid inherits Rectangle {
+    in property <[ThumbRows]> slides: [];
+    in property <int> active-index: 0;
+    callback select-slide(int);
+    callback close-sorter();
+
+    background: Theme.palette().canvas;
+
+    VerticalLayout {
+        padding: Theme.tokens.space.lg;
+        spacing: Theme.tokens.space.md;
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.md;
+            Text {
+                text: "Slide Sorter";
+                font-size: Theme.type.heading;
+                font-weight: 700;
+                color: Theme.palette().ink;
+                vertical-alignment: center;
+            }
+            Rectangle { horizontal-stretch: 1; }
+            LoomButton {
+                label: "Done";
+                variant: "primary";
+                clicked => { root.close-sorter(); }
+            }
+        }
+
+        Flickable {
+            vertical-stretch: 1;
+            VerticalLayout {
+                spacing: Theme.tokens.space.md;
+                for row[idx] in root.slides : HorizontalLayout {
+                    spacing: Theme.tokens.space.md;
+                    Rectangle {
+                        height: 140px;
+                        horizontal-stretch: 1;
+                        background: idx == root.active-index ? Theme.palette().selection-soft : Theme.palette().surface;
+                        border-width: idx == root.active-index ? 2px : 1px;
+                        border-color: idx == root.active-index ? Theme.palette().accent : Theme.palette().border;
+                        border-radius: Theme.tokens.metrics.radius-medium;
+
+                        HorizontalLayout {
+                            padding: Theme.tokens.space.sm;
+                            spacing: Theme.tokens.space.md;
+                            Text {
+                                text: "" + (idx + 1);
+                                font-size: Theme.type.body;
+                                font-weight: 600;
+                                color: Theme.palette().ink-secondary;
+                                width: 28px;
+                                vertical-alignment: center;
+                            }
+                            MiniSlide {
+                                width: 200px;
+                                rows: row;
+                                description: "Slide " + (idx + 1);
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        TouchArea {
+                            clicked => { root.select-slide(idx); }
+                            double-clicked => {
+                                root.select-slide(idx);
+                                root.close-sorter();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

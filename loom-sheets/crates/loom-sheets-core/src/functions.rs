@@ -89,6 +89,23 @@ pub(crate) fn eval_extended_function(
         return Some(v);
     }
     match name {
+        "HYPERLINK" => {
+            if raw_args.is_empty() || raw_args.len() > 2 {
+                return Some(Value::Error(CalcError::Value));
+            }
+            let url = match crate::functions_util::arg_text(raw_args, 0, lookup) {
+                Ok(text) => text,
+                Err(error) => return Some(Value::Error(error)),
+            };
+            if raw_args.len() == 2 {
+                match crate::functions_util::arg_text(raw_args, 1, lookup) {
+                    Ok(label) => Some(Value::Text(label)),
+                    Err(error) => Some(Value::Error(error)),
+                }
+            } else {
+                Some(Value::Text(url))
+            }
+        }
         "LEFT" => {
             if raw_args.is_empty() || raw_args.len() > 2 {
                 return Some(Value::Error(CalcError::Value));

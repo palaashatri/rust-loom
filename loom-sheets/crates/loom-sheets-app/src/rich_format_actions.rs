@@ -42,7 +42,7 @@ pub(crate) fn publish_viewport(
     zoom: f32,
 ) {
     let mat_rows = crate::materialized_rows(sheet, viewport);
-    let mat_cols = crate::materialized_cols(viewport);
+    let mat_cols = crate::materialized_cols(sheet, viewport);
     let cap = mat_rows.len() * mat_cols.len();
     let mut strikethroughs = Vec::with_capacity(cap);
     let mut border_tops = Vec::with_capacity(cap);
@@ -112,15 +112,20 @@ fn build_merged_views(
         let vis_start_col = range.start.col.max(viewport.first_col);
         let vis_end_col = range.end.col.min(col_end.saturating_sub(1));
 
+        let projected_col_width = |c: u32| -> f32 {
+            if sheet.hidden_cols.contains(&c) {
+                0.0
+            } else {
+                sheet.col_width(c) * zoom
+            }
+        };
         let x: f32 = (viewport.first_col..vis_start_col)
-            .map(|c| sheet.col_width(c) * zoom)
+            .map(projected_col_width)
             .sum();
         let y: f32 = (viewport.first_row..vis_start_row)
             .map(|r| projected_row_height(sheet, r, zoom))
             .sum();
-        let width: f32 = (vis_start_col..=vis_end_col)
-            .map(|c| sheet.col_width(c) * zoom)
-            .sum();
+        let width: f32 = (vis_start_col..=vis_end_col).map(projected_col_width).sum();
         let height: f32 = (vis_start_row..=vis_end_row)
             .map(|r| projected_row_height(sheet, r, zoom))
             .sum();
@@ -132,11 +137,17 @@ fn build_merged_views(
         let raw_val = cell_value(sheet, values, anchor.row, anchor.col);
         let base_style = sheet.cell_style(anchor);
         let formatted_val = base_style.format_value(&raw_val);
-        let display_val = base_style.format_value_fit(
-            &raw_val,
-            width / zoom.max(0.1),
-            formatting::effective_font_size(base_style) as f32,
-        );
+        let display_val = match sheet
+            .raw(anchor)
+            .filter(|r| crate::parity_actions::show_formulas_enabled() && r.starts_with('='))
+        {
+            Some(raw) => raw.to_string(),
+            None => base_style.format_value_fit(
+                &raw_val,
+                width / zoom.max(0.1),
+                formatting::effective_font_size(base_style) as f32,
+            ),
+        };
         let effective = sheet.effective_style(anchor, &formatted_val);
         let numeric = matches!(values.get(&anchor), Some(Value::Number(_)))
             || raw_val.trim().parse::<f64>().is_ok();

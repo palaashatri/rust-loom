@@ -108,6 +108,8 @@ pub(crate) const MUTATING: &[&str] = &[
     "toggle_active_table_title",
     // P0 parity mutations (guarded by `mutation_guard::refused`).
     "autofill_series",
+    "fill_drag_started",
+    "fill_drag_ended",
     "format_painter_apply",
 ];
 
@@ -162,6 +164,7 @@ pub(crate) const ALLOWED: &[&str] = &[
     "copy_selection",
     "close_chart",
     "clear_audit",
+    "fill_drag_moved",
     "format_painter_copy",
     "format_painter_lock",
     "toggle_show_formulas",

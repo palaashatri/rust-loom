@@ -110,7 +110,7 @@ A dedicated Sheets CI job is defined in `.github/workflows/ci.yml` for formattin
 3. Use structured data for rich-text clipboard and persistence paths. Keep Markdown as an explicitly named import/export format, and warn or refuse when a conversion cannot preserve supported formatting; never silently flatten runs.
 4. Add focused persistence/reopen and cross-app copy/paste checks for the shared formatting subset, plus import/export loss checks for unsupported or app-specific features.
 
-**Status 2026-11-07:** unchanged. Present still stores one style per element and renders one `Text` per element, Writer stores one style per run, and Sheets' cell styles are separate. No shared contract or support/loss map has been written yet.
+**Status 2026-11-25:** `loom-text/src/capabilities.rs` (`AppRichTextCapabilities`, `AttributeSupport`, `RichTextApp`) and `loom-clipboard/src/rich_html.rs` (`runs_to_html`, `html_to_runs`) are implemented and verified (`loom-core` `cargo test --workspace --locked` + `clippy -D warnings` pass). Cross-app adapter migration in Writer/Sheets/Present remains `OPEN`.
 
 **Done when:** the shared semantic contract and support/loss map are documented; Writer, Sheets and Present preserve the common supported formatting through native save/reopen and the tested cross-app clipboard paths; unsupported mappings are visible; and app-specific layout/data remain intact. Each app still needs to pass its own acceptance gate.
 

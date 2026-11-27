@@ -26,6 +26,7 @@ export component MiniSlide inherits Rectangle {
     in property <ThumbRows> rows;
     in property <string> description;
     in property <bool> aspect-ratio-wide: true;
+    in property <int> slide-number: 1;
     height: self.width * (root.aspect-ratio-wide ? 0.5625 : 0.75);
     accessible-role: image;
     accessible-label: root.description;
@@ -36,6 +37,7 @@ export component MiniSlide inherits Rectangle {
         editing-enabled: false;
         fit-screen: true;
         miniature: true;
+        slide-number: root.slide-number;
         background: transparent;
         element-labels: root.rows.labels;
         element-contents: root.rows.contents;
@@ -120,6 +122,7 @@ component PresentSlideThumbnail inherits Rectangle {
             rows: root.rows;
             description: root.title;
             aspect-ratio-wide: root.aspect-ratio-wide;
+            slide-number: root.index + 1;
         }
         if Theme.rtl : Text {
             text: (root.index + 1) + "";

@@ -40,6 +40,7 @@ fn header_footer_config_survives_package_save_and_reopen() {
         alignment: "right".into(),
         page_number_format: PageNumberFormat::RomanLower,
         different_first_page: true,
+        ..Default::default()
     };
 
     let content = document.to_content_json();

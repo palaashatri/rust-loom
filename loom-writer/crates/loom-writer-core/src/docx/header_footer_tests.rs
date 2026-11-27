@@ -38,6 +38,7 @@ fn exported_parts_and_fields_round_trip_canonical_settings() {
         alignment: "right".into(),
         page_number_format: PageNumberFormat::RomanLower,
         different_first_page: true,
+        ..Default::default()
     };
 
     let exported = export_docx(&document).expect("export header/footer");

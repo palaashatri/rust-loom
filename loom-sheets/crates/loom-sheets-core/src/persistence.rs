@@ -80,6 +80,10 @@ struct PersistedStyle {
     color: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     wrap: bool,
+    #[serde(default)]
+    vertical_align: crate::style::VerticalAlign,
+    #[serde(default)]
+    indent: u8,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -168,6 +172,24 @@ struct PersistedValidation {
     error_message: String,
 }
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct PersistedAnnotations {
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    hyperlinks: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    notes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    data_bars: Vec<crate::conditional_format::DataBarRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    color_scales: Vec<crate::conditional_format::ColorScaleRule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    print_area: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    print_header: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    print_footer: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct PersistedSheet {
     name: String,
@@ -192,6 +214,8 @@ struct PersistedSheet {
     auto_filter: Option<PersistedAutoFilter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hidden_rows: Vec<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    hidden_cols: Vec<u32>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     named_ranges: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -200,6 +224,8 @@ struct PersistedSheet {
     merges: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     conditional_rules: Vec<PersistedConditionalRule>,
+    #[serde(default)]
+    annotations: PersistedAnnotations,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     tables: Vec<crate::SheetTable>,
 }
@@ -284,6 +310,8 @@ impl From<&Sheet> for PersistedSheet {
                         .text_color
                         .map(|rgb| format!("#{:06X}", rgb & 0x00FF_FFFF)),
                     wrap: style.wrap,
+                    vertical_align: style.vertical_align,
+                    indent: style.indent,
                 })
                 .collect(),
             col_widths: sheet
@@ -338,6 +366,7 @@ impl From<&Sheet> for PersistedSheet {
                     .collect(),
             }),
             hidden_rows: sheet.hidden_rows.iter().copied().collect(),
+            hidden_cols: sheet.hidden_cols.iter().copied().collect(),
             named_ranges: sheet
                 .named_ranges
                 .iter()
@@ -414,6 +443,25 @@ impl From<&Sheet> for PersistedSheet {
                 .iter()
                 .map(|range| range.to_a1())
                 .collect(),
+            annotations: PersistedAnnotations {
+                hyperlinks: sheet
+                    .annotations
+                    .hyperlinks
+                    .iter()
+                    .map(|(k, v)| (k.to_a1(), v.clone()))
+                    .collect(),
+                notes: sheet
+                    .annotations
+                    .notes
+                    .iter()
+                    .map(|(k, v)| (k.to_a1(), v.clone()))
+                    .collect(),
+                data_bars: sheet.annotations.data_bars.clone(),
+                color_scales: sheet.annotations.color_scales.clone(),
+                print_area: sheet.annotations.print_area.map(|r| r.to_a1()),
+                print_header: sheet.annotations.print_header.clone(),
+                print_footer: sheet.annotations.print_footer.clone(),
+            },
             conditional_rules: sheet
                 .conditional_rules
                 .iter()
@@ -570,7 +618,8 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
             font_size: style.font,
             text_color: parse_text_color(style.color.as_deref())?,
             wrap: style.wrap,
-            ..Default::default()
+            vertical_align: style.vertical_align,
+            indent: style.indent,
         };
         if sheet.styles.insert(reference, value).is_some() {
             return Err(format!("duplicate style reference {:?}", style.reference));
@@ -640,6 +689,7 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
         };
     }
     sheet.hidden_rows = raw.hidden_rows.into_iter().collect();
+    sheet.hidden_cols = raw.hidden_cols.into_iter().collect();
     for (name, range_a1) in raw.named_ranges {
         let range = CellRange::parse(&range_a1)
             .ok_or_else(|| format!("invalid named range target {range_a1:?}"))?;
@@ -716,6 +766,25 @@ fn decode_sheet(raw: PersistedSheet) -> Result<Sheet, String> {
         });
     }
     sheet.tables = raw.tables;
+    for (k, v) in raw.annotations.hyperlinks {
+        if let Some(cell) = CellRef::parse(&k) {
+            sheet.annotations.hyperlinks.insert(cell, v);
+        }
+    }
+    for (k, v) in raw.annotations.notes {
+        if let Some(cell) = CellRef::parse(&k) {
+            sheet.annotations.notes.insert(cell, v);
+        }
+    }
+    sheet.annotations.data_bars = raw.annotations.data_bars;
+    sheet.annotations.color_scales = raw.annotations.color_scales;
+    sheet.annotations.print_area = raw
+        .annotations
+        .print_area
+        .as_deref()
+        .and_then(CellRange::parse);
+    sheet.annotations.print_header = raw.annotations.print_header;
+    sheet.annotations.print_footer = raw.annotations.print_footer;
     Ok(sheet)
 }
 

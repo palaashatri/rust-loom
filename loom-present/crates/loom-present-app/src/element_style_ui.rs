@@ -8,6 +8,9 @@ use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::object_parts::{color, look};
 use crate::{refresh, set_status, ElementInk, GuiState, LoomColorSwatch, PresentApp};
+
+#[path = "parity_ui.rs"]
+pub(crate) mod parity_ui;
 use loom_ui::color_palette::{
     color_from_rgb, format_hex_rgb, parse_hex_rgb, swatch_name_for_rgb, LOOM_SWATCHES,
 };
@@ -60,6 +63,7 @@ pub(crate) fn publish(
     session: &PresentationSession,
     element: &loom_present_core::SlideElement,
 ) {
+    parity_ui::publish_selection_effects(app, session);
     let ink = app.global::<ElementInk>();
     let Some(active_look) = look(element) else {
         ink.set_available(false);
@@ -609,6 +613,7 @@ pub(crate) fn request(app: &PresentApp, kind: &str, value: i32) {
 }
 
 pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
+    parity_ui::wire(app, state);
     let ink = app.global::<ElementInk>();
     ink.set_palette(ModelRc::new(VecModel::from(
         PALETTE.iter().map(|hex| color(hex)).collect::<Vec<_>>(),
@@ -641,6 +646,9 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
         let (state, app_ref) = (state.clone(), app.as_weak());
         ink.on_arrange_requested(move |action| {
             let Some(app) = app_ref.upgrade() else { return };
+            if parity_ui::handle_arrange_parity(&app, &state, action.as_str()) {
+                return;
+            }
             let mut session = state.session.borrow_mut();
             let changed = match action.as_str() {
                 "front" => session.bring_to_front(),
@@ -815,6 +823,22 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
     let (state, app_ref) = (state.clone(), app.as_weak());
     ink.on_requested(move |kind, value| {
         let Some(app) = app_ref.upgrade() else { return };
+        if kind.as_str() == "list-bullet" {
+            parity_ui::toggle_list_style(
+                &app,
+                &state,
+                loom_present_core::list_text::ListStyle::Bullet,
+            );
+            return;
+        }
+        if kind.as_str() == "list-numbered" {
+            parity_ui::toggle_list_style(
+                &app,
+                &state,
+                loom_present_core::list_text::ListStyle::Numbered,
+            );
+            return;
+        }
         if let Some(words) = apply(&state, kind.as_str(), value) {
             refresh(&app, &state);
             set_status(&app, &words);

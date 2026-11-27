@@ -3072,6 +3072,7 @@ dependencies = [
  "clipboard-win",
  "image",
  "loom-objects",
+ "loom-text",
  "serde",
  "serde_json",
 ]
@@ -3211,6 +3212,10 @@ dependencies = [
  "serde_json",
  "slint",
 ]
+
+[[package]]
+name = "loom-text"
+version = "0.1.0"
 
 [[package]]
 name = "loom-ui"

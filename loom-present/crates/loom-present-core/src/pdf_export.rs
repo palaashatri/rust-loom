@@ -131,7 +131,7 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     };
     let sx = page_w / PAGE_WIDTH;
     let has_visible = doc.slides.iter().any(|s| !s.hidden);
-    for slide in &doc.slides {
+    for (slide_idx, slide) in doc.slides.iter().enumerate() {
         if has_visible && slide.hidden {
             continue;
         }
@@ -164,6 +164,20 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
                 scaled.x *= sx;
                 scaled.width *= sx;
                 draw_element(&mut pdf, page, doc, &scaled, &mut pdf_images);
+            }
+        }
+        if !doc.footer_text.is_empty() || doc.show_slide_number {
+            let footer_style = TextStyle {
+                size_pt: 9.0,
+                fill_rgb: (0.43, 0.43, 0.45),
+                ..Default::default()
+            };
+            if !doc.footer_text.is_empty() {
+                pdf.draw_text(page, 24.0, 14.0, &doc.footer_text, &footer_style);
+            }
+            if doc.show_slide_number {
+                let num = format!("{}", slide_idx + 1);
+                pdf.draw_text(page, page_w - 36.0, 14.0, &num, &footer_style);
             }
         }
     }

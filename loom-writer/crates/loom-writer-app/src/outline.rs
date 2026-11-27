@@ -57,6 +57,7 @@ fn current_heading(entries: &[OutlineEntry], doc: &WriterDocument) -> Option<usi
 /// Shows the document's headings in the pane. Does nothing while the pane is
 /// hidden.
 pub(crate) fn publish(app: &WriterApp, doc: &WriterDocument) {
+    crate::picture_actions::image_wrap_ui::publish(app, doc);
     if !app.get_show_navigator() {
         return;
     }
@@ -117,11 +118,41 @@ pub(crate) fn jump(app: &WriterApp, state: &GuiState, index: usize) {
 
 /// Connects the pane's rows to [`jump`].
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
-    let state = state.clone();
+    let state_jump = Rc::clone(state);
     let app_ref = app.as_weak();
     app.on_jump_outline(move |index| {
         if let (Some(app), Ok(index)) = (app_ref.upgrade(), usize::try_from(index)) {
-            jump(&app, &state, index);
+            jump(&app, &state_jump, index);
         }
     });
+    let state_toc = state.clone();
+    let app_toc = app.as_weak();
+    app.global::<crate::WriterFormatState>()
+        .on_insert_toc(move || {
+            if let Some(app) = app_toc.upgrade() {
+                insert_toc(&app, &state_toc);
+            }
+        });
+}
+
+/// Inserts a formatted Table of Contents at the current selection with undo history.
+pub(crate) fn insert_toc(app: &WriterApp, state: &Rc<GuiState>) {
+    let mut next = state.current.borrow().clone();
+    let entries = next.generate_toc();
+    if entries.is_empty() {
+        app.set_status_left("No headings found for Table of Contents".into());
+        return;
+    }
+    let mut lines = vec!["Table of Contents".to_string()];
+    for entry in &entries {
+        let indent = "  ".repeat(entry.level.saturating_sub(1) as usize);
+        lines.push(format!("{indent}{}", entry.title));
+    }
+    let toc_text = lines.join("\n") + "\n";
+    if next.replace_selection_text(&toc_text).is_ok() {
+        let _ = crate::apply_with_history(app, state, next, crate::HistoryKind::DocumentAction);
+        app.set_status_left(
+            format!("Inserted Table of Contents ({} headings)", entries.len()).into(),
+        );
+    }
 }

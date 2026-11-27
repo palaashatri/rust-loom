@@ -1,11 +1,24 @@
 import { Theme } from "theme.slint";
+import { AuditHighlightRect } from "formula_audit_overlay.slint";
 
 /// Global state and callbacks for Sheets P0 parity features.
 export global SheetsParityState {
     in-out property <bool> show-formulas: false;
     in-out property <bool> format-painter-active: false;
     in-out property <bool> format-painter-locked: false;
+    in-out property <[AuditHighlightRect]> audit-highlights: [];
+    in-out property <bool> fill-handle-visible: false;
+    in-out property <length> fill-handle-x: 0px;
+    in-out property <length> fill-handle-y: 0px;
+    in-out property <bool> fill-dragging: false;
+    in-out property <length> fill-preview-x: 0px;
+    in-out property <length> fill-preview-y: 0px;
+    in-out property <length> fill-preview-w: 0px;
+    in-out property <length> fill-preview-h: 0px;
     callback autofill-series();
+    callback fill-drag-started(length, length);
+    callback fill-drag-moved(length, length);
+    callback fill-drag-ended(length, length);
     callback hide-rows();
     callback unhide-rows();
     callback hide-cols();
@@ -43,9 +56,9 @@ export component FillHandleOverlay inherits Rectangle {
         y: preview-y;
         width: preview-w;
         height: preview-h;
-        background: #188038.with-alpha(0.08);
+        background: Theme.palette().accent.with-alpha(0.08);
         border-width: 1.5px;
-        border-color: #188038;
+        border-color: Theme.palette().accent;
     }
 
     if visible-handle: Rectangle {
@@ -53,9 +66,9 @@ export component FillHandleOverlay inherits Rectangle {
         y: corner-y - 3px;
         width: 6px;
         height: 6px;
-        background: #188038;
+        background: Theme.palette().accent;
         border-width: 1px;
-        border-color: #ffffff;
+        border-color: Theme.palette().surface;
 
         TouchArea {
             mouse-cursor: crosshair;

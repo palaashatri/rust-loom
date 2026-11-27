@@ -8,6 +8,7 @@ import { WriterFormatState } from "alignment_state.slint";
 import { WriterHeaderFooterState } from "writer_header_footer.slint";
 import { WriterFormatTab } from "text_formatting.slint";
 import { ImageWrapInspector } from "image_inspector.slint";
+import { PageImages } from "writer_projection.slint";
 
 /// Exact page geometry displayed by Writer's document inspector, in millimeters.
 export struct WriterPageGeometry {
@@ -220,7 +221,22 @@ export component WriterInspector inherits LoomPanel {
             padding-bottom: Theme.tokens.space.md;
             alignment: start;
 
-            if root.inspector-tab == 0 : ImageWrapInspector { }
+            if root.inspector-tab == 0 : ImageWrapInspector {
+                has-image: PageImages.wrap-has-image;
+                wrap-mode-index: PageImages.wrap-mode-index;
+                wrap-side-index: PageImages.wrap-side-index;
+                wrap-align-index: PageImages.wrap-align-index;
+                x-offset-label: PageImages.wrap-x-offset-label;
+                y-offset-label: PageImages.wrap-y-offset-label;
+                margin-left-label: PageImages.wrap-margin-left-label;
+                margin-right-label: PageImages.wrap-margin-right-label;
+                set-wrap-mode(m) => { PageImages.set-wrap-mode(m); }
+                set-wrap-side(s) => { PageImages.set-wrap-side(s); }
+                set-wrap-align(a) => { PageImages.set-wrap-align(a); }
+                step-x-offset(d) => { PageImages.step-x-offset(d); }
+                step-y-offset(d) => { PageImages.step-y-offset(d); }
+                step-wrap-margin(side, d) => { PageImages.step-wrap-margin(side, d); }
+            }
             if root.inspector-tab == 0 : WriterFormatTab {
                 is-table-selected <=> root.is-table-selected;
                 table-style-id <=> root.table-style-id;

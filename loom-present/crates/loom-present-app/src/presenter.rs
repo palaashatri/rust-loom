@@ -72,6 +72,44 @@ pub(crate) fn format_elapsed(elapsed: Duration) -> String {
 struct Presenter {
     window: PresenterWindow,
     _ticker: Timer,
+    slide_count: Rc<std::cell::Cell<usize>>,
+    active_slide: Rc<std::cell::Cell<usize>>,
+    tools: Rc<RefCell<crate::presenter_tools::PresenterToolState>>,
+}
+
+fn sync_annotations(
+    win: &PresenterWindow,
+    st: &crate::presenter_tools::PresenterToolState,
+    slide_idx: usize,
+) {
+    let mut dots = Vec::new();
+    if let Some(overlay) = st.overlays.get(&slide_idx) {
+        for stroke in &overlay.strokes {
+            let color = match stroke.tool {
+                loom_present_core::AnnotationDrawingTool::Highlighter => {
+                    slint::Color::from_argb_u8(115, 250, 204, 21)
+                }
+                _ => slint::Color::from_argb_u8(255, 239, 68, 68),
+            };
+            let size = stroke.width.max(2.0);
+            for &(px, py) in &stroke.points {
+                dots.push(crate::PresenterStrokeDot {
+                    x: px,
+                    y: py,
+                    color,
+                    size,
+                });
+            }
+        }
+    }
+    win.set_stroke_dots(slint::ModelRc::new(slint::VecModel::from(dots)));
+    if let Some((lx, ly)) = st.laser_pos {
+        win.set_has_laser(true);
+        win.set_laser_x(lx);
+        win.set_laser_y(ly);
+    } else {
+        win.set_has_laser(false);
+    }
 }
 
 thread_local! {
@@ -111,6 +149,8 @@ pub(crate) fn sync(session: &PresentationSession) {
             return;
         };
         let document = &session.document;
+        presenter.slide_count.set(document.len());
+        presenter.active_slide.set(document.active_index);
         let index = document.active_index;
         let window = &presenter.window;
         window.set_position_text(format!("Slide {} of {}", index + 1, document.len()).into());
@@ -136,6 +176,7 @@ pub(crate) fn sync(session: &PresentationSession) {
         window.set_next_title(
             next.map_or_else(SharedString::new, |slide| slide.title.as_str().into()),
         );
+        sync_annotations(window, &presenter.tools.borrow(), index);
     });
 }
 
@@ -217,6 +258,8 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         });
     }
     window.on_close_presenter(close);
+    let slide_count = Rc::new(std::cell::Cell::new(1));
+    let active_slide = Rc::new(std::cell::Cell::new(0));
     let tools = Rc::new(RefCell::new(
         crate::presenter_tools::PresenterToolState::default(),
     ));
@@ -234,13 +277,39 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
     }
     {
         let tools = tools.clone();
-        let app = app.as_weak();
+        let active_slide = active_slide.clone();
+        let w = window.as_weak();
         window.on_clear_annotations(move || {
-            let idx = app
-                .upgrade()
-                .map(|a| a.get_active_slide_index().max(0) as usize)
-                .unwrap_or(0);
-            tools.borrow_mut().clear_slide(idx);
+            tools.borrow_mut().clear_slide(active_slide.get());
+            if let Some(win) = w.upgrade() {
+                sync_annotations(&win, &tools.borrow(), active_slide.get());
+            }
+        });
+    }
+    {
+        let tools = tools.clone();
+        let active_slide = active_slide.clone();
+        let w = window.as_weak();
+        let tools_b = tools.clone();
+        let active_b = active_slide.clone();
+        let w_b = w.clone();
+        window.on_stroke_begin(move |fx, fy| {
+            let mut st = tools_b.borrow_mut();
+            let idx = active_b.get();
+            st.begin_stroke(idx, fx, fy);
+            if let Some(win) = w_b.upgrade() {
+                sync_annotations(&win, &st, idx);
+            }
+        });
+        let tools_m = tools.clone();
+        let active_m = active_slide.clone();
+        window.on_stroke_move(move |fx, fy| {
+            let mut st = tools_m.borrow_mut();
+            let idx = active_m.get();
+            st.extend_stroke(idx, fx, fy);
+            if let Some(win) = w.upgrade() {
+                sync_annotations(&win, &st, idx);
+            }
         });
     }
     {
@@ -259,15 +328,12 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         let tools = tools.clone();
         let w = window.as_weak();
         let app = app.as_weak();
+        let slide_count = slide_count.clone();
         window.on_commit_jump(move || {
-            let was_empty = tools.borrow().jump_buffer.is_empty();
-            if let Some(target) = tools.borrow_mut().commit_jump(usize::MAX) {
+            let target = tools.borrow_mut().commit_jump(slide_count.get());
+            if let Some(target) = target {
                 if let Some(a) = app.upgrade() {
                     a.invoke_select_slide(target as i32);
-                }
-            } else if was_empty {
-                if let Some(a) = app.upgrade() {
-                    a.invoke_next_slide();
                 }
             }
             if let Some(win) = w.upgrade() {
@@ -282,6 +348,9 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
     Ok(Presenter {
         window,
         _ticker: ticker,
+        slide_count,
+        active_slide,
+        tools,
     })
 }
 

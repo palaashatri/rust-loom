@@ -237,12 +237,23 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
             alignment_attr("wrapText").as_deref(),
             Some("1") | Some("true")
         );
+        let vertical_align = match alignment_attr("vertical")
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("top") => crate::style::VerticalAlign::Top,
+            Some("center") => crate::style::VerticalAlign::Middle,
+            _ => crate::style::VerticalAlign::Bottom,
+        };
+        let indent = alignment_attr("indent")
+            .and_then(|v| v.parse::<u8>().ok())
+            .unwrap_or(0)
+            .min(15);
         let alignment_approximated = matches!(
             horizontal.as_deref(),
             Some("fill") | Some("justify") | Some("distributed")
-        ) || alignment_attr("indent")
-            .is_some_and(|value| value != "0")
-            || alignment_attr("textRotation").is_some_and(|value| value != "0");
+        ) || alignment_attr("textRotation")
+            .is_some_and(|value| value != "0");
         table.xfs.push(XfDef {
             style: CellStyle {
                 bold: font.bold,
@@ -256,7 +267,8 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
                 font_size: font.size,
                 text_color: font.color,
                 wrap,
-                ..Default::default()
+                vertical_align,
+                indent,
             },
             alignment,
             number_lossy: number.lossy,

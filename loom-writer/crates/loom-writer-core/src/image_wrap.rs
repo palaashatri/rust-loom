@@ -252,6 +252,26 @@ impl WriterDocument {
         true
     }
 
+    /// Sets only the vertical wrap offset of picture `id`, preserving its horizontal alignment.
+    pub fn set_image_wrap_y_offset(&mut self, id: u64, y_offset_pt: f32) -> bool {
+        if !y_offset_pt.is_finite() {
+            return false;
+        }
+        let Some(image) = self
+            .blocks
+            .iter_mut()
+            .find(|b| b.id == id && b.is_image())
+            .and_then(|b| b.image.as_mut())
+        else {
+            return false;
+        };
+        if (image.wrap_y_offset_pt - y_offset_pt).abs() < 0.001 {
+            return false;
+        }
+        image.wrap_y_offset_pt = y_offset_pt;
+        true
+    }
+
     /// Sets the outer wrap margins (in points) of picture `id`. Returns `true` if changed.
     pub fn set_image_wrap_margins(&mut self, id: u64, margins: WrapMargins) -> bool {
         let clamped = WrapMargins {

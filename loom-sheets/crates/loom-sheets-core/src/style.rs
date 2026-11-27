@@ -193,7 +193,9 @@ impl BorderPreset {
 
 /// Visual and numerical formatting style applied to a worksheet cell.
 /// Vertical alignment within a cell.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum VerticalAlign {
     /// Align to the top edge of the cell.
     Top,

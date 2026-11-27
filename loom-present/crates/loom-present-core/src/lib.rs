@@ -1160,7 +1160,11 @@ pub struct PresentationDocument {
     pub active_index: usize,
     #[serde(default = "default_aspect_ratio_wide")]
     pub aspect_ratio_wide: bool,
-    /// Embedded picture data keyed by asset id; stored as package parts, not in the JSON.
+    #[serde(default)]
+    pub footer_text: String,
+    #[serde(default)]
+    pub show_slide_number: bool,
+    /// Embedded picture data keyed by asset id.
     #[serde(skip)]
     pub assets: std::collections::BTreeMap<String, ImageAsset>,
 }
@@ -1179,6 +1183,8 @@ impl PresentationDocument {
             slides: Vec::new(),
             active_index: 0,
             aspect_ratio_wide: true,
+            footer_text: String::new(),
+            show_slide_number: false,
             assets: Default::default(),
         };
         let mut cover = Slide::new("slide-1", "Title Slide", "cover");
@@ -1718,7 +1724,7 @@ impl PresentationSession {
         if !slide
             .elements
             .iter()
-            .any(|element| selected.contains(&element.id))
+            .any(|element| selected.contains(&element.id) && !element.locked)
         {
             return 0;
         }
@@ -1730,7 +1736,7 @@ impl PresentationSession {
         let before = slide.elements.len();
         slide
             .elements
-            .retain(|element| !selected.contains(&element.id));
+            .retain(|element| !selected.contains(&element.id) || element.locked);
         let removed = before - slide.elements.len();
         self.selected_elements.clear();
         removed

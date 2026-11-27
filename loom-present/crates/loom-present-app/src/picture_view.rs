@@ -208,7 +208,37 @@ pub(crate) fn sync(app: &PresentApp, document: &PresentationDocument) {
                 .map(|e| ModelRc::new(VecModel::from(crate::object_parts::parts_for(e))))
                 .collect::<Vec<_>>(),
         )));
+    app.global::<crate::ObjectParts>()
+        .set_element_meta(ModelRc::new(VecModel::from(
+            document
+                .active_slide()
+                .map(|slide| slide.elements.as_slice())
+                .unwrap_or(&[])
+                .iter()
+                .map(|e| {
+                    let eff = e.effects.as_ref();
+                    crate::ElementVisualMeta {
+                        opacity: eff.map_or(1.0, |x| x.opacity),
+                        corner_radius: eff.map_or(0.0, |x| x.corner_radius),
+                        has_shadow: eff.is_some_and(|x| x.shadow.is_some()),
+                        shadow_dx: eff
+                            .and_then(|x| x.shadow.as_ref())
+                            .map_or(0.0, |s| s.offset_x),
+                        shadow_dy: eff
+                            .and_then(|x| x.shadow.as_ref())
+                            .map_or(0.0, |s| s.offset_y),
+                        locked: e.locked,
+                        flip_h: e.flip_h,
+                        flip_v: e.flip_v,
+                    }
+                })
+                .collect::<Vec<_>>(),
+        )));
     sync_thumbnails(app, document);
+    if app.global::<crate::ElementInk>().get_slide_sorter_open() {
+        let parts = app.global::<crate::ObjectParts>();
+        parts.set_sorter_active_index(document.active_index as i32);
+    }
 }
 
 /// Thumbnails of the slides the strip is drawing (it reports them through

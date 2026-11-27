@@ -11,6 +11,11 @@ use slint::{ComponentHandle, SharedString};
 use crate::picture_view;
 use crate::{apply_with_history, GuiState, HistoryKind, PictureAlt, WriterApp};
 
+#[path = "hyperlink_ui.rs"]
+pub(crate) mod hyperlink_ui;
+#[path = "image_wrap_ui.rs"]
+pub(crate) mod image_wrap_ui;
+
 std::thread_local! {
     /// The picture the open Picture Description dialog edits.
     static ALT_TARGET: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
@@ -218,6 +223,9 @@ pub(crate) fn dispatch(app: &WriterApp, id: &str) {
 
 /// Wires the Insert Picture command.
 pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
+    image_wrap_ui::wire(app, state);
+    hyperlink_ui::wire(app, state);
+    crate::format_painter::wire(app, state);
     STATE.with(|slot| *slot.borrow_mut() = Some(Rc::downgrade(state)));
     let dialog = app.global::<PictureAlt>();
     let (save_app, save_state) = (app.as_weak(), state.clone());

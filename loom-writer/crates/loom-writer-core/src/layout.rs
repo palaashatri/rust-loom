@@ -282,6 +282,91 @@ fn wrapped_document_block(
     wrapped_with_inline_advances(block, font_size, width, &advances)
 }
 
+fn wrap_block_with_exclusions(
+    doc: &WriterDocument,
+    block: &RichBlock,
+    font_size: f32,
+    col_width: f32,
+    est_h: f32,
+    start_y: f32,
+    exclusions: &[wrap_exclusion::ExclusionRect],
+) -> BlockInfo {
+    let text = block.text.as_str();
+    let any_active = !text.is_empty()
+        && exclusions
+            .iter()
+            .any(|e| e.y_pt + e.height_pt + e.margins.bottom_pt > start_y);
+    if !any_active {
+        return wrapped_document_block(doc, block, font_size, col_width);
+    }
+
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    let mut cursor = 0usize;
+    let mut cur_y = start_y;
+    while cursor < text.len() {
+        let (_, mut avail, push_below) =
+            wrap_exclusion::compute_line_span(exclusions, cur_y, est_h, col_width);
+        if let Some(pb) = push_below {
+            if pb > cur_y {
+                cur_y = pb;
+                avail = wrap_exclusion::compute_line_span(exclusions, cur_y, est_h, col_width).1;
+            }
+        }
+        let rem = &text[cursor..];
+        let mut slice_block = RichBlock::new(block.id, block.kind.as_str(), rem);
+        slice_block.style = block.style.clone();
+        slice_block.runs = block
+            .runs
+            .iter()
+            .filter_map(|r| {
+                if r.end <= cursor {
+                    return None;
+                }
+                let mut cloned = r.clone();
+                cloned.start = r.start.saturating_sub(cursor);
+                cloned.end = r.end.saturating_sub(cursor).min(rem.len());
+                (cloned.start < cloned.end).then_some(cloned)
+            })
+            .collect();
+        let slice_info = wrapped(&slice_block, font_size, avail);
+        let mut step = slice_info.lines.first().map_or(rem.len(), |l| l.end);
+        if step == 0 {
+            step = rem.chars().next().map_or(0, char::len_utf8);
+        }
+        ranges.push(cursor..cursor + step);
+        cursor += step;
+        cur_y += est_h;
+    }
+
+    let base = wrapped(block, font_size, col_width);
+    let shaped = shape_block_lines(block, &ranges, font_size, col_width);
+    let lines: Vec<WrappedLine> = ranges
+        .into_iter()
+        .zip(shaped)
+        .map(|(range, shaped_line)| {
+            let shaped_line = shaped_line.map(Arc::new);
+            let advance_pt = shaped_line.as_ref().map_or(0.0, |l| l.width_pt());
+            WrappedLine {
+                start: range.start,
+                end: range.end,
+                advance_pt,
+                x_offset_pt: 0.0,
+                shaped_line,
+            }
+        })
+        .collect();
+    let line_height_pt = lines
+        .iter()
+        .filter_map(|line| line.shaped_line.as_deref())
+        .map(|line| line.ascent_pt() + line.descent_pt() + line.line_gap_pt())
+        .fold(base.line_height_pt, f32::max);
+    BlockInfo {
+        lines: lines.into(),
+        line_height_pt,
+        ..base
+    }
+}
+
 /// Start a pass over a document's blocks and, after a pass, drop entries for
 /// blocks that no longer exist.
 fn begin_pass() {
@@ -435,7 +520,7 @@ impl WriterDocument {
         let usable_height = style.height_pt - style.margin_top_pt - style.margin_bottom_pt;
         let body_line = style.body_font_size_pt * style.line_height;
         begin_pass();
-        let mut placer = Placer::new(usable_height);
+        let mut placer = Placer::new(usable_width, usable_height);
         let mut block_starts = Vec::with_capacity(self.blocks.len());
         let mut block_start = 0usize;
         for (block_index, block) in self.blocks.iter().enumerate() {
@@ -444,8 +529,60 @@ impl WriterDocument {
             // heading has wider glyphs and a taller line box than body text.
             let font_size = style.font_size_for_kind(block.kind.as_str());
             let picture = block.object_display_size(usable_width, usable_height);
-            let info =
-                wrapped_document_block(self, block, font_size, block.text_column_width(style));
+            let col_width = block.text_column_width(style);
+            let info = if !placer.exclusions.is_empty()
+                && picture.is_none()
+                && block.kind != crate::TABLE_BLOCK_KIND
+            {
+                let est_h = text_line_height(style, block);
+                wrap_block_with_exclusions(
+                    self,
+                    block,
+                    font_size,
+                    col_width,
+                    est_h,
+                    placer.used,
+                    &placer.exclusions,
+                )
+            } else {
+                wrapped_document_block(self, block, font_size, col_width)
+            };
+            if let Some(image) = block.image.as_ref() {
+                if let Some(wrap) = image
+                    .wrap
+                    .filter(|w| w.mode != loom_objects::ImageWrapMode::Inline)
+                {
+                    placer.flush_pending_break();
+                    let rect = wrap_exclusion::compute_floating_image_rect(
+                        image,
+                        &wrap,
+                        usable_width,
+                        usable_height,
+                        placer.used,
+                    );
+                    if matches!(
+                        wrap.mode,
+                        loom_objects::ImageWrapMode::Square
+                            | loom_objects::ImageWrapMode::Tight
+                            | loom_objects::ImageWrapMode::TopAndBottom
+                    ) {
+                        placer.exclusions.push(wrap_exclusion::ExclusionRect {
+                            x_pt: rect.0,
+                            y_pt: rect.1,
+                            width_pt: rect.2,
+                            height_pt: rect.3,
+                            mode: wrap.mode,
+                            side: wrap.side,
+                            margins: wrap.margins,
+                        });
+                    }
+                    if let Some(first_line) = info.lines.first() {
+                        placer.place_floating_image(block_index, block_start, first_line, rect);
+                    }
+                    block_start += block.text.len_bytes() + 1;
+                    continue;
+                }
+            }
             // Typed table cells may wrap and carry larger run metrics than the
             // table's flat editor text can express. Keep one reserved height
             // per typed row, falling back only when shaping itself is refused;
@@ -489,7 +626,7 @@ impl WriterDocument {
                         .object_display_size(usable_width, usable_height)
                         .map_or(text_line_height(style, next), |(_, h)| h);
                     let wanted = if next_lines.lines.len() >= 3 { 2 } else { 1 };
-                    let mut probe = Placer::new(usable_height);
+                    let mut probe = Placer::new(usable_width, usable_height);
                     probe.used = used;
                     if !probe.fits(wanted, next_height) {
                         placer.next_page();
@@ -676,8 +813,28 @@ impl WriterDocument {
                     },
                     |(width, _)| width * zoom,
                 );
+                let is_floating_image = block
+                    .image
+                    .as_ref()
+                    .and_then(|img| img.wrap)
+                    .is_some_and(|w| w.mode != loom_objects::ImageWrapMode::Inline);
+                if is_floating_image {
+                    lines[at].bounds = PageRect {
+                        x: content_x + lines[at].bounds.x * zoom,
+                        y: page_y + (style.margin_top_pt + lines[at].bounds.y) * zoom,
+                        width: lines[at].bounds.width * zoom,
+                        height: lines[at].bounds.height * zoom,
+                    };
+                    continue;
+                }
+                if lines[at].bounds.y > 0.0 {
+                    let line_top = page_y + (style.margin_top_pt + lines[at].bounds.y) * zoom;
+                    if line_top > line_y {
+                        line_y = line_top;
+                    }
+                }
                 lines[at].bounds = PageRect {
-                    x: content_x + block.text_start_pt(style) * zoom,
+                    x: content_x + (block.text_start_pt(style) + line.x_offset_pt) * zoom,
                     y: line_y,
                     width,
                     height: line_height,

@@ -66,6 +66,7 @@ impl RecoveredDraft {
                     header_footer,
                     comments,
                     tracked_changes,
+                    hyperlinks: _,
                     blocks,
                     footnotes,
                     selection: _,

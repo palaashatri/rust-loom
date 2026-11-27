@@ -234,6 +234,7 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         cmd_entry("help.shortcuts", "Keyboard Shortcuts"),
         cmd_entry("view.inspector", "Toggle Format Inspector"),
         cmd_entry("view.navigator", "Toggle Outline Navigator"),
+        cmd_entry("view.ruler", "Toggle Horizontal Ruler"),
         cmd_entry("view.zoom_in", "Zoom In"),
         cmd_entry("view.zoom_out", "Zoom Out"),
         cmd_entry("view.zoom_actual", "Actual Size (100%)"),
@@ -242,6 +243,7 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         cmd_entry("review.word_count", "Word Count & Statistics…"),
         cmd_entry("writer.review.open", "Open Tracked Changes…"),
         cmd_entry("insert.header_footer", "Headers & Footers…"),
+        cmd_entry("insert.toc", "Insert Table of Contents"),
         cmd_entry("insert.comment", "Insert Comment"),
         PaletteCommand {
             action: PaletteAction::ToggleBold,

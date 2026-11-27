@@ -22,6 +22,7 @@ component EffectStepRow inherits HorizontalLayout {
 
 export component StyleEffectsPanel inherits VerticalLayout {
     in property <bool> has-selection: false;
+    in-out property <bool> expanded: false;
     in property <int> opacity-pct: 100;
     in property <int> corner-radius-px: 0;
     in property <int> stroke-width-px: 0;
@@ -36,56 +37,54 @@ export component StyleEffectsPanel inherits VerticalLayout {
     callback toggle-shadow();
     callback toggle-gradient();
 
-    spacing: Theme.tokens.space.xs;
+    spacing: 2px;
     visible: root.has-selection;
 
-    Text {
-        text: "Effects";
-        font-size: Theme.type.caption;
-        font-weight: 600;
-        color: Theme.palette().ink-secondary;
-        horizontal-alignment: Theme.rtl ? right : left;
-    }
-
-    EffectStepRow {
-        label-text: "Opacity " + root.opacity-pct + "%";
-        dec => { root.set-opacity(Math.max(10, root.opacity-pct - 10)); }
-        inc => { root.set-opacity(Math.min(100, root.opacity-pct + 10)); }
-    }
-
-    EffectStepRow {
-        label-text: "Radius " + root.corner-radius-px + "px";
-        dec => { root.set-corner-radius(Math.max(0, root.corner-radius-px - 4)); }
-        inc => { root.set-corner-radius(Math.min(48, root.corner-radius-px + 4)); }
-    }
-
-    EffectStepRow {
-        label-text: "Stroke " + root.stroke-width-px + "px (" + (root.stroke-dash == 0 ? "Solid" : (root.stroke-dash == 1 ? "Dash" : "Dot")) + ")";
-        dec => { root.set-stroke-width(Math.max(0, root.stroke-width-px - 1)); }
-        inc => { root.set-stroke-width(Math.min(12, root.stroke-width-px + 1)); }
-    }
     LoomButton {
-        label: "Cycle Stroke Dash";
-        variant: "secondary";
-        clicked => { root.cycle-stroke-dash(); }
+        label: root.expanded ? "Hide Effects ▴" : "Effects ▾";
+        variant: "ghost";
+        accessible-name: root.expanded ? "Hide effects controls" : "Show effects controls";
+        clicked => { root.expanded = !root.expanded; }
     }
 
-    HorizontalLayout {
+    if root.expanded : VerticalLayout {
         spacing: Theme.tokens.space.xs;
-        if Theme.rtl : LoomButton {
-            label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
-            variant: root.has-gradient ? "primary" : "secondary";
-            clicked => { root.toggle-gradient(); }
+        EffectStepRow {
+            label-text: "Opacity " + root.opacity-pct + "%";
+            dec => { root.set-opacity(Math.max(10, root.opacity-pct - 10)); }
+            inc => { root.set-opacity(Math.min(100, root.opacity-pct + 10)); }
+        }
+        EffectStepRow {
+            label-text: "Radius " + root.corner-radius-px + "px";
+            dec => { root.set-corner-radius(Math.max(0, root.corner-radius-px - 4)); }
+            inc => { root.set-corner-radius(Math.min(48, root.corner-radius-px + 4)); }
+        }
+        EffectStepRow {
+            label-text: "Stroke " + root.stroke-width-px + "px";
+            dec => { root.set-stroke-width(Math.max(0, root.stroke-width-px - 1)); }
+            inc => { root.set-stroke-width(Math.min(12, root.stroke-width-px + 1)); }
         }
         LoomButton {
-            label: root.has-shadow ? "Shadow: On" : "Shadow: Off";
-            variant: root.has-shadow ? "primary" : "secondary";
-            clicked => { root.toggle-shadow(); }
+            label: root.stroke-dash == 0 ? "Dash: Solid" : (root.stroke-dash == 1 ? "Dash: Dashed" : "Dash: Dotted");
+            clicked => { root.cycle-stroke-dash(); }
         }
-        if !Theme.rtl : LoomButton {
-            label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
-            variant: root.has-gradient ? "primary" : "secondary";
-            clicked => { root.toggle-gradient(); }
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            if Theme.rtl : LoomButton {
+                label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
+                variant: root.has-gradient ? "primary" : "secondary";
+                clicked => { root.toggle-gradient(); }
+            }
+            LoomButton {
+                label: root.has-shadow ? "Shadow: On" : "Shadow: Off";
+                variant: root.has-shadow ? "primary" : "secondary";
+                clicked => { root.toggle-shadow(); }
+            }
+            if !Theme.rtl : LoomButton {
+                label: root.has-gradient ? "Gradient: On" : "Gradient: Off";
+                variant: root.has-gradient ? "primary" : "secondary";
+                clicked => { root.toggle-gradient(); }
+            }
         }
     }
 }

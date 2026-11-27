@@ -57,5 +57,16 @@ export component PresentArrangeSection inherits VerticalLayout {
                 if k == 3 : LoomButton { label: "Dist V"; variant: "ghost"; clicked => { ElementInk.arrange-requested("dist-v"); } }
             }
         }
+        HorizontalLayout {
+            spacing: 2px;
+            for slot in 4 : VerticalLayout {
+                property <int> k: Theme.rtl ? 3 - slot : slot;
+                horizontal-stretch: 1;
+                if k == 0 : LoomButton { label: ElementInk.selection-grouped ? "Ungroup" : "Group"; variant: "ghost"; clicked => { ElementInk.arrange-requested(ElementInk.selection-grouped ? "ungroup" : "group"); } }
+                if k == 1 : LoomButton { label: ElementInk.selection-locked ? "Unlock" : "Lock"; variant: "ghost"; clicked => { ElementInk.arrange-requested("toggle-lock"); } }
+                if k == 2 : LoomButton { label: "Flip H"; variant: "ghost"; clicked => { ElementInk.arrange-requested("flip-h"); } }
+                if k == 3 : LoomButton { label: "Flip V"; variant: "ghost"; clicked => { ElementInk.arrange-requested("flip-v"); } }
+            }
+        }
     }
 }

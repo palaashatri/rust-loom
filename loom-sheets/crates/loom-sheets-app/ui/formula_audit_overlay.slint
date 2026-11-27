@@ -1,3 +1,5 @@
+import { Theme } from "theme.slint";
+
 /// Highlight rect for a traced precedent or dependent cell.
 export struct AuditHighlightRect {
     x: length,
@@ -19,8 +21,8 @@ export component FormulaAuditOverlay inherits Rectangle {
         y: item.y;
         width: item.w;
         height: item.h;
-        background: item.is-precedent ? #2563eb.with-alpha(0.10) : #16a34a.with-alpha(0.10);
+        background: item.is-precedent ? Theme.palette().accent.with-alpha(0.10) : Theme.palette().success.with-alpha(0.10);
         border-width: 2px;
-        border-color: item.is-precedent ? #2563eb : #16a34a;
+        border-color: item.is-precedent ? Theme.palette().accent : Theme.palette().success;
     }
 }

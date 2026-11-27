@@ -9,6 +9,7 @@ pub mod html;
 pub mod model;
 pub mod os;
 pub mod picture;
+pub mod rich_html;
 pub mod sheets_interop;
 pub mod style_clipboard;
 pub mod tsv;

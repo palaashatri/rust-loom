@@ -122,7 +122,7 @@ export struct WriterTableCellRect {
     edge-right: WriterCellEdge,
 }
 
-/// An inline picture placed on the page stack.
+/// An inline or floating picture placed on the page stack.
 export struct WriterPageImage {
     x: length,
     y: length,
@@ -132,9 +132,26 @@ export struct WriterPageImage {
     label: string,
     /// True for the picture the caret is on: it draws an outline and corner handles.
     selected: bool,
+    /// 0 = BehindText, 1 = Inline/Wrapped, 2 = InFrontOfText.
+    z-order: int,
 }
 
 /// The pictures the page shows; set from Rust with the rest of the projection.
 export global PageImages {
     in-out property <[WriterPageImage]> items: [];
+    in-out property <bool> wrap-has-image: false;
+    in-out property <int> wrap-mode-index: 0;
+    in-out property <int> wrap-side-index: 0;
+    in-out property <int> wrap-align-index: 0;
+    in-out property <string> wrap-x-offset-label: "0 pt";
+    in-out property <string> wrap-y-offset-label: "0 pt";
+    in-out property <string> wrap-margin-left-label: "9 pt";
+    in-out property <string> wrap-margin-right-label: "9 pt";
+
+    callback set-wrap-mode(int);
+    callback set-wrap-side(int);
+    callback set-wrap-align(int);
+    callback step-x-offset(float);
+    callback step-y-offset(float);
+    callback step-wrap-margin(string, float);
 }

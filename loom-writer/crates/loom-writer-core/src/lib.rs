@@ -352,20 +352,16 @@ pub struct WriterDocument {
     pub footnotes: Vec<FootnoteEntry>,
     /// Pending tracked changes and recording identity/settings.
     pub tracked_changes: TrackedChanges,
+    /// Inline hyperlinks keyed by `(block_id, start..end)`.
+    pub hyperlinks: hyperlinks::HyperlinkTable,
     /// Document blocks in order.
     pub blocks: Vec<RichBlock>,
     /// Active text selection in the canonical [`Self::editor_text`] stream.
-    ///
-    /// The selection is kept with the document so controller state can be
-    /// restored after save/reopen. Offsets are UTF-8 byte offsets and are
-    /// normalized to character boundaries by [`Self::set_selection`].
     pub selection: TextSelection,
 }
 
 impl WriterDocument {
-    /// Whether `other` holds the same content: everything except the selection.
-    /// Moving the caret alone is not a change to the document's content. The
-    /// fields are destructured, so a new field has to be considered here.
+    /// Whether `other` holds the same content (excluding selection).
     pub fn same_content_as(&self, other: &Self) -> bool {
         let WriterDocument {
             id,
@@ -375,6 +371,7 @@ impl WriterDocument {
             comments,
             footnotes,
             tracked_changes,
+            hyperlinks,
             blocks,
             selection: _,
         } = self;
@@ -385,6 +382,7 @@ impl WriterDocument {
             && *comments == other.comments
             && *footnotes == other.footnotes
             && *tracked_changes == other.tracked_changes
+            && *hyperlinks == other.hyperlinks
             && *blocks == other.blocks
     }
 
@@ -398,6 +396,7 @@ impl WriterDocument {
             comments: Vec::new(),
             footnotes: Vec::new(),
             tracked_changes: TrackedChanges::default(),
+            hyperlinks: Default::default(),
             blocks: Vec::new(),
             selection: TextSelection::caret(0),
         }
@@ -552,11 +551,10 @@ impl WriterDocument {
         if !self.footnotes.is_empty() {
             footnotes::rebase_after_block_rebuild(&mut self.footnotes, &old_blocks, &self.blocks);
         }
+        self.hyperlinks
+            .rebase_after_block_replace(&old_blocks, &self.blocks);
     }
 
-    /// Rebuild the blocks from plain text and return the old ones; comment
-    /// anchors are left for the caller to rebase. A table block that `edit`
-    /// touches stays one table block (see `tables::map_tables_through_edit`).
     pub(crate) fn rebuild_blocks(
         &mut self,
         plain_text: &str,
@@ -706,6 +704,10 @@ impl WriterDocument {
         s.push_str(&self.footnotes_to_content_json());
         s.push_str(",\"tracked_changes\":");
         s.push_str(&self.tracked_changes.write_content_json());
+        if !self.hyperlinks.spans.is_empty() {
+            s.push_str(",\"hyperlinks\":");
+            s.push_str(&self.hyperlinks.write_content_json());
+        }
         s.push_str(",\"selection\":");
         s.push_str(&selection_json(&self.selection));
         s.push('}');
@@ -725,6 +727,7 @@ impl WriterDocument {
         let mut footnotes: Option<Vec<FootnoteEntry>> = None;
         let mut tracked_changes: Option<TrackedChanges> = None;
         let mut tracked_changes_seen = false;
+        let mut hyperlinks: Option<hyperlinks::HyperlinkTable> = None;
 
         // Minimal safe parse: reuse loom_package's bounded JSON parser on the
         // top-level object, then iterate the entries array.
@@ -798,6 +801,14 @@ impl WriterDocument {
                     };
                     tracked_changes = Some(TrackedChanges::from_content_json_value(raw)?);
                 }
+                "hyperlinks" => {
+                    if let JsonValue::Raw(raw) = v {
+                        hyperlinks = Some(
+                            hyperlinks::HyperlinkTable::from_content_json(raw)
+                                .map_err(WriterError::Json)?,
+                        );
+                    }
+                }
                 _ => {}
             }
         }
@@ -858,6 +869,7 @@ impl WriterDocument {
             comments,
             footnotes,
             tracked_changes,
+            hyperlinks: hyperlinks.unwrap_or_default(),
             blocks,
             selection,
         };

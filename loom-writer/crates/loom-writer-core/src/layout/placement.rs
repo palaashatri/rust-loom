@@ -16,6 +16,7 @@ pub(super) struct Placer {
     pub(super) page_lines: Vec<Range<usize>>,
     pub(super) used: f32,
     usable: f32,
+    usable_width: f32,
     first_line: usize,
     page: usize,
     break_pending: bool,
@@ -39,17 +40,48 @@ pub(super) struct Segment<'a> {
 }
 
 impl Placer {
-    pub(super) fn new(usable: f32) -> Self {
+    pub(super) fn new(usable_width: f32, usable: f32) -> Self {
         Self {
             lines: Vec::new(),
             page_lines: Vec::new(),
             used: 0.0,
             usable,
+            usable_width,
             first_line: 0,
             page: 0,
             break_pending: false,
             exclusions: Vec::new(),
         }
+    }
+
+    pub(super) fn flush_pending_break(&mut self) {
+        if std::mem::take(&mut self.break_pending) && self.has_content() {
+            self.next_page();
+        }
+    }
+
+    pub(super) fn place_floating_image(
+        &mut self,
+        block_index: usize,
+        block_start: usize,
+        line: &WrappedLine,
+        rect: (f32, f32, f32, f32),
+    ) {
+        self.lines.push(FlowLine {
+            block_index,
+            start: line.start,
+            end: line.end,
+            global_start: block_start + line.start,
+            page: self.page,
+            bounds: PageRect {
+                x: rect.0,
+                y: rect.1,
+                width: rect.2,
+                height: rect.3,
+            },
+            x_offset_pt: rect.0,
+            shaped_line: line.shaped_line.clone(),
+        });
     }
 
     pub(super) fn has_content(&self) -> bool {
@@ -61,6 +93,7 @@ impl Placer {
         self.first_line = self.lines.len();
         self.page += 1;
         self.used = 0.0;
+        self.exclusions.clear();
     }
 
     pub(super) fn finish(mut self) -> (Vec<FlowLine>, Vec<Range<usize>>) {
@@ -130,22 +163,26 @@ impl Placer {
                     .and_then(|heights| heights.get(done + local))
                     .copied()
                     .unwrap_or(segment.line_height);
-                let (excl_x, _avail, push_below) = super::wrap_exclusion::compute_line_span(
+                let (_excl_x, _avail, push_below) = super::wrap_exclusion::compute_line_span(
                     &self.exclusions,
                     self.used,
                     height,
-                    self.usable,
+                    self.usable_width,
                 );
+                let mut pushed_y = 0.0f32;
                 if let Some(y) = push_below {
                     if y > self.used {
                         self.used = y;
+                        pushed_y = y;
                     }
                 }
-                let x_off = if line.x_offset_pt != 0.0 {
-                    line.x_offset_pt
-                } else {
-                    excl_x
-                };
+                let (excl_x, _, _) = super::wrap_exclusion::compute_line_span(
+                    &self.exclusions,
+                    self.used,
+                    height,
+                    self.usable_width,
+                );
+                let x_off = excl_x;
                 self.lines.push(FlowLine {
                     block_index: segment.block_index,
                     start: line.start,
@@ -154,7 +191,7 @@ impl Placer {
                     page: self.page,
                     bounds: PageRect {
                         x: x_off,
-                        y: 0.0,
+                        y: pushed_y,
                         width: segment.fixed_width.unwrap_or(line.advance_pt),
                         height,
                     },
