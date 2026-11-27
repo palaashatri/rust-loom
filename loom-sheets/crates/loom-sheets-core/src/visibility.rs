@@ -7,7 +7,7 @@ pub fn hide_rows(sheet: &mut Sheet, start_row: u32, end_row: u32) -> Vec<u32> {
     let (lo, hi) = (start_row.min(end_row), start_row.max(end_row));
     let mut changed = Vec::new();
     for r in lo..=hi {
-        if r >= 1 && sheet.hidden_rows.insert(r) {
+        if sheet.hidden_rows.insert(r) {
             changed.push(r);
         }
     }
@@ -31,7 +31,7 @@ pub fn hide_cols(sheet: &mut Sheet, start_col: u32, end_col: u32) -> Vec<u32> {
     let (lo, hi) = (start_col.min(end_col), start_col.max(end_col));
     let mut changed = Vec::new();
     for c in lo..=hi {
-        if c >= 1 && sheet.hidden_cols.insert(c) {
+        if sheet.hidden_cols.insert(c) {
             changed.push(c);
         }
     }

@@ -501,7 +501,7 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("d", false, true) => "table.sort_desc",
         ("f", false, true) => "table.freeze_header",
         ("u", false, true) => "table.unfreeze_panes",
-        ("`" | "~", false, false) => "formula.show_formulas",
+        ("`", false, false) | ("~", true, false) | ("~", false, false) => "formula.show_formulas",
         ("b", false, true) => "format.borders",
         ("g", false, true) => "format.fill_cycle",
         ("g", true, true) => "format.merge",

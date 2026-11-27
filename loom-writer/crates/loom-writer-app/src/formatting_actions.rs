@@ -791,6 +791,24 @@ pub(crate) fn command_specs() -> Vec<CommandSpec> {
             33,
         ),
         (
+            "format.copy_style",
+            "Copy Format",
+            "Copy formatting from the current selection",
+            33,
+        ),
+        (
+            "format.apply_style",
+            "Apply Format",
+            "Apply copied formatting to the current selection",
+            33,
+        ),
+        (
+            "insert.hyperlink",
+            "Insert Hyperlink",
+            "Insert or edit a hyperlink on the selected text",
+            33,
+        ),
+        (
             "writer.style.color",
             "Text Color",
             "Choose foreground color for selected text",

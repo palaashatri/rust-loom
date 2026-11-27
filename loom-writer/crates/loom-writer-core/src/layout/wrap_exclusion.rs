@@ -107,7 +107,7 @@ pub(crate) fn compute_line_span(
         }
     }
 
-    let avail = (x_end - x_start).max(24.0_f32.min(col_width));
+    let avail = (x_end - x_start).max(0.0);
     (x_start, avail, push_below)
 }
 

@@ -69,6 +69,14 @@ pub(crate) fn register_parity_actions(
                     let before = state.current.borrow().clone();
                     let mut after = before.clone();
                     $fn_name(&mut after, sel);
+                    if after.hidden_rows == before.hidden_rows
+                        && after.hidden_cols == before.hidden_cols
+                        && after.freeze_rows == before.freeze_rows
+                        && after.freeze_cols == before.freeze_cols
+                    {
+                        app.set_status_left($msg.into());
+                        return;
+                    }
                     commit_transaction(
                         &mut state.current.borrow_mut(),
                         &mut state.undo_stack.borrow_mut(),
@@ -135,10 +143,17 @@ pub(crate) fn register_parity_actions(
         let fp = fp.clone();
         parity.on_format_painter_lock(move || {
             if let Some(app) = app_ref.upgrade() {
+                let g = app.global::<crate::SheetsParityState>();
+                if fp.borrow().is_locked() {
+                    fp.borrow_mut().cancel();
+                    g.set_format_painter_active(false);
+                    g.set_format_painter_locked(false);
+                    app.set_status_left("Format Painter cleared".into());
+                    return;
+                }
                 let active = crate::selection_from_app(&app).focus;
                 fp.borrow_mut()
                     .pick_locked_from_cell(&state.current.borrow(), active);
-                let g = app.global::<crate::SheetsParityState>();
                 g.set_format_painter_active(true);
                 g.set_format_painter_locked(true);
                 app.set_status_left("Format Painter locked".into());

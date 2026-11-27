@@ -523,7 +523,6 @@ fn project_inner(
                 image: picture.clone(),
                 z_order: ImageZOrder::from_image(picture),
             });
-            crate::image_projection::sort_by_z_order(&mut images);
             continue;
         }
 
@@ -1229,6 +1228,7 @@ fn project_inner(
     );
     let (footnote_lines, footnote_references) =
         project_footnotes(doc, &flow, base_page, zoom, &pages);
+    crate::image_projection::sort_by_z_order(&mut images);
     Projection {
         rows,
         selection_rects,
