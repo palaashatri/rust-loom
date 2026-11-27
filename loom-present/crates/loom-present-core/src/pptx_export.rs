@@ -151,16 +151,22 @@ fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: boo
     for line in &lines {
         let trimmed = line.trim_start_matches("  ");
         let lvl = ((line.len() - trimmed.len()) / 2).min(4);
-        let (ppr_inner, body_text) = if let Some(rest) = trimmed.strip_prefix("• ") {
-            ("<a:buChar char=\"•\"/>", rest)
+        let (ppr_inner, body_text): (String, &str) = if let Some(rest) = trimmed.strip_prefix("• ")
+        {
+            ("<a:buChar char=\"•\"/>".to_string(), rest)
+        } else if let Some(rest) = trimmed.strip_prefix("- ") {
+            ("<a:buChar char=\"•\"/>".to_string(), rest)
         } else if let Some((num, rest)) = trimmed.split_once(". ") {
             if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
-                ("<a:buAutoNum type=\"arabicPeriod\"/>", rest)
+                (
+                    format!("<a:buAutoNum type=\"arabicPeriod\" startAt=\"{num}\"/>"),
+                    rest,
+                )
             } else {
-                ("", *line)
+                (String::new(), *line)
             }
         } else {
-            ("", *line)
+            (String::new(), *line)
         };
         if ppr_inner.is_empty() {
             xml.push_str(&format!("<a:p><a:pPr algn=\"{algn}\" lvl=\"{lvl}\"/>"));
