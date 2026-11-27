@@ -77,6 +77,20 @@ pub(crate) use crate::image_projection::{ImageZOrder, PageImagePart};
 /// Layout viewport in page points: width and height stay the page's so the
 /// projection is independent of shell width; zoom and scroll are controller
 /// state.
+fn empty_caret(height: f32) -> WriterSelectionRect {
+    WriterSelectionRect {
+        page_index: 0,
+        x: 0.0,
+        y: 0.0,
+        width: 1.0,
+        height,
+        caret: true,
+        has_color: false,
+        color: slint::Color::from_argb_encoded(0),
+        table_cell: false,
+    }
+}
+
 pub(crate) fn layout_viewport(style: &PageStyle, viewport: PageViewport) -> PageViewport {
     PageViewport {
         width: style.width_pt,
@@ -220,6 +234,7 @@ pub(crate) fn ui_selection_rects(
             caret: selection.start == selection.end,
             has_color: false,
             color: slint::Color::from_argb_encoded(0),
+            table_cell: false,
         })
         .collect()
 }
@@ -420,16 +435,7 @@ fn project_inner(
     let Ok(flow) = doc.flow(&style, layout_viewport(&style, viewport)) else {
         let mut selection_rects = Vec::new();
         if doc.blocks.is_empty() {
-            selection_rects.push(WriterSelectionRect {
-                page_index: 0,
-                x: 0.0,
-                y: 0.0,
-                width: 1.0,
-                height: style.body_font_size_pt * style.line_height,
-                caret: true,
-                has_color: false,
-                color: slint::Color::from_argb_encoded(0),
-            });
+            selection_rects.push(empty_caret(style.body_font_size_pt * style.line_height));
         }
         return Projection {
             rows: fallback_rows(doc, &style),
@@ -1193,6 +1199,7 @@ fn project_inner(
                                             color: slint::Color::from_argb_encoded(
                                                 caret_color.as_deref().map_or(0, parse_hex_color),
                                             ),
+                                            table_cell: true,
                                         }];
                                     }
                                 }
@@ -1204,16 +1211,7 @@ fn project_inner(
         }
     }
     if selection_rects.is_empty() && doc.blocks.is_empty() {
-        selection_rects.push(WriterSelectionRect {
-            page_index: 0,
-            x: 0.0,
-            y: 0.0,
-            width: 1.0,
-            height: style.body_font_size_pt * style.line_height,
-            caret: true,
-            has_color: false,
-            color: slint::Color::from_argb_encoded(0),
-        });
+        selection_rects.push(empty_caret(style.body_font_size_pt * style.line_height));
     }
     let comment_rects = comment_rects(doc, &style, &flow, base_page, &pages);
     let revision_marks = revision_projection::project(doc, &style, &flow, base_page, &pages);
