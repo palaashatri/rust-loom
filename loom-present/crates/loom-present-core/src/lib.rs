@@ -5,26 +5,33 @@ use loom_package::manifest::{
 };
 use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
+pub mod animations;
 pub mod arrange;
 mod element_style;
 pub mod find_replace;
+pub mod group_lock;
+pub mod list_text;
 mod pdf_export;
 mod pictures;
 mod pptx_export;
 mod pptx_titles;
 pub mod print_layout;
+pub mod rich_style;
 pub mod rich_text;
 mod session_history;
 mod slide_order;
 mod tables;
 pub mod templates;
+pub use animations::*;
 pub use arrange::{AlignMode, DistributeAxis};
 pub use find_replace::{find_matches, replace_all, replace_match, TextMatch};
+pub use list_text::*;
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub use print_layout::{
     export_pdf_with_options, preview_print_pages, PaperSize, PrintLayout, PrintOptions,
     PrintOrientation, PrintPagePreview,
 };
+pub use rich_style::*;
 pub use rich_text::{StyledTextRun, TextRangeStyleChange};
 pub use templates::{
     apply_theme_preset, document_from_template, template_catalog, SlideTheme, TemplateDescriptor,
@@ -76,6 +83,10 @@ pub enum SlideActionTrigger {
     OpenUrl(String),
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SlideElement {
     pub id: String,
@@ -95,6 +106,18 @@ pub struct SlideElement {
     /// Optional per-run rich text formatting; when empty, `content` + `style` apply.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runs: Vec<StyledTextRun>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effects: Option<ElementEffects>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub locked: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip_h: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub flip_v: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paragraphs: Vec<ListParagraph>,
 }
 
 impl SlideElement {
@@ -125,6 +148,10 @@ pub struct Slide {
     pub elements: Vec<SlideElement>,
     pub speaker_notes: String,
     pub bg_color: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub animations: Vec<AnimationEntry>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 impl Slide {
@@ -136,6 +163,8 @@ impl Slide {
             elements: Vec::new(),
             speaker_notes: String::new(),
             bg_color: "#ffffff".to_string(),
+            animations: Vec::new(),
+            hidden: false,
         }
     }
 
@@ -363,7 +392,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
                 self.add_element(SlideElement {
                     id: "sub-1".into(),
@@ -377,7 +406,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
             }
             SlideLayoutPreset::TitleAndContent => {
@@ -394,7 +423,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
                 self.add_element(SlideElement {
                     id: "body-1".into(),
@@ -408,7 +437,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
             }
             SlideLayoutPreset::TwoColumn => {
@@ -425,7 +454,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
                 self.add_element(SlideElement {
                     id: "col-1".into(),
@@ -439,7 +468,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
                 self.add_element(SlideElement {
                     id: "col-2".into(),
@@ -453,7 +482,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
             }
             SlideLayoutPreset::Quote => {
@@ -470,7 +499,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
             }
             SlideLayoutPreset::BigStat => {
@@ -487,7 +516,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
                 self.add_element(SlideElement {
                     id: "label-1".into(),
@@ -501,7 +530,7 @@ impl Slide {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
             }
         }
@@ -647,26 +676,6 @@ impl Default for StrokeConfig {
             color: "#000000".into(),
             width: 1.0,
             style: StrokeStyle::Solid,
-        }
-    }
-}
-
-/// Drop shadow effect configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DropShadowConfig {
-    pub offset_x: f32,
-    pub offset_y: f32,
-    pub blur_radius: f32,
-    pub color: String,
-}
-
-impl Default for DropShadowConfig {
-    fn default() -> Self {
-        Self {
-            offset_x: 2.0,
-            offset_y: 2.0,
-            blur_radius: 4.0,
-            color: "rgba(0, 0, 0, 0.3)".into(),
         }
     }
 }
@@ -1185,7 +1194,7 @@ impl PresentationDocument {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         doc.slides.push(cover);
         doc
@@ -1426,7 +1435,7 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                     action: None,
 
                     style: Default::default(),
-                    runs: Vec::new(),
+                    ..Default::default()
                 });
             }
         } else {
@@ -1445,7 +1454,7 @@ pub fn deck_from_outline(outline: &str) -> Result<Vec<Slide>, String> {
                 action: None,
 
                 style: Default::default(),
-                runs: Vec::new(),
+                ..Default::default()
             });
             slides.push(slide);
         }
@@ -2150,47 +2159,6 @@ fn unique_slide_id(document: &PresentationDocument, prefix: &str) -> String {
     }
 }
 
-/// Entrance animation effect presets for slide elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum AnimationEffect {
-    #[default]
-    Appear,
-    FadeIn,
-    FlyFromLeft,
-    FlyFromRight,
-    ZoomIn,
-}
-
-/// One object animation entry bound to a slide element.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnimationEntry {
-    pub element_id: String,
-    pub effect: AnimationEffect,
-    /// Zero-based position in the click-build sequence.
-    pub build_order: usize,
-    pub duration_ms: u32,
-    pub delay_ms: u32,
-}
-
-/// Sorts animation entries into their build order (stable).
-pub fn sort_animation_builds(entries: &mut [AnimationEntry]) {
-    entries.sort_by_key(|entry| entry.build_order);
-}
-
-/// Computes normalized eased progress 0.0..=1.0 of an entry at elapsed ms (after delay), using
-/// smoothstep easing (3t^2 - 2t^3) clamped to [0,1]. Before delay elapses => 0.0; past end => 1.0.
-pub fn animation_progress(entry: &AnimationEntry, elapsed_ms: u32) -> f64 {
-    if elapsed_ms < entry.delay_ms {
-        return 0.0;
-    }
-    if entry.duration_ms == 0 || elapsed_ms - entry.delay_ms >= entry.duration_ms {
-        return 1.0;
-    }
-    let t = f64::from(elapsed_ms - entry.delay_ms) / f64::from(entry.duration_ms);
-    let t = t.clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
-
 /// Accessibility reading-order assignment for one slide's elements.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReadingOrder {
@@ -2616,7 +2584,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         }));
         assert_eq!(session.document.active_slide().unwrap().elements.len(), 2);
         assert!(session.undo());
@@ -2640,7 +2608,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         doc.active_slide_mut().unwrap().elements.push(SlideElement {
             id: "elem-2".into(),
@@ -2654,7 +2622,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
 
         let session = PresentationSession::new(doc);
@@ -2680,7 +2648,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         };
         let mut session = PresentationSession::new(doc);
         assert_eq!(session.hit_test(210.0, 205.0), None);
@@ -2704,7 +2672,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         doc.active_slide_mut().unwrap().elements.push(SlideElement {
             id: "elem-2".into(),
@@ -2718,7 +2686,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2784,7 +2752,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2894,7 +2862,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
 
         let mut session = PresentationSession::new(doc);
@@ -2961,7 +2929,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -2975,7 +2943,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
 
         assert_eq!(slide.elements.len(), 2);
@@ -3014,7 +2982,7 @@ mod tests {
                 action: None,
 
                 style: Default::default(),
-                runs: Vec::new(),
+                ..Default::default()
             }
         };
         // Centers: e1=(50,50) e2=(525,425) e3=(950,750) e4=(1850,1850)
@@ -3128,7 +3096,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         slide.add_element(SlideElement {
             id: "e2".into(),
@@ -3142,7 +3110,7 @@ mod tests {
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
 
         let bbox = slide.elements_bounding_box(&["e1", "e2"]).unwrap();
@@ -3446,6 +3414,8 @@ Hiring Plan
             AnimationEntry {
                 element_id: "title".into(),
                 effect: AnimationEffect::FadeIn,
+                phase: AnimationPhase::BuildIn,
+                trigger: BuildTrigger::OnClick,
                 build_order: 2,
                 duration_ms: 400,
                 delay_ms: 100,
@@ -3453,6 +3423,8 @@ Hiring Plan
             AnimationEntry {
                 element_id: "chart".into(),
                 effect: AnimationEffect::ZoomIn,
+                phase: AnimationPhase::BuildIn,
+                trigger: BuildTrigger::OnClick,
                 build_order: 1,
                 duration_ms: 200,
                 delay_ms: 0,
@@ -3460,6 +3432,8 @@ Hiring Plan
             AnimationEntry {
                 element_id: "subtitle".into(),
                 effect: AnimationEffect::FlyFromLeft,
+                phase: AnimationPhase::BuildIn,
+                trigger: BuildTrigger::OnClick,
                 build_order: 1,
                 duration_ms: 300,
                 delay_ms: 50,
@@ -3467,6 +3441,8 @@ Hiring Plan
             AnimationEntry {
                 element_id: "stat".into(),
                 effect: AnimationEffect::Appear,
+                phase: AnimationPhase::BuildIn,
+                trigger: BuildTrigger::OnClick,
                 build_order: 0,
                 duration_ms: 500,
                 delay_ms: 250,
@@ -3486,6 +3462,8 @@ Hiring Plan
         let fade = AnimationEntry {
             element_id: "fade-item".into(),
             effect: AnimationEffect::FadeIn,
+            phase: AnimationPhase::BuildIn,
+            trigger: BuildTrigger::OnClick,
             build_order: 0,
             duration_ms: 400,
             delay_ms: 100,
@@ -3507,6 +3485,8 @@ Hiring Plan
         let instant = AnimationEntry {
             element_id: "instant".into(),
             effect: AnimationEffect::Appear,
+            phase: AnimationPhase::BuildIn,
+            trigger: BuildTrigger::OnClick,
             build_order: 0,
             duration_ms: 0,
             delay_ms: 50,
@@ -3615,7 +3595,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         };
         fit_element_to_box(&mut elem, 0.0, 0.0, 600.0, 600.0).expect("fit failed");
         assert_eq!(elem.x, 0.0);
@@ -3638,7 +3618,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         };
         let mut slide = Slide::new("slide-grid", "Grid", "blank");
         for name in ["a", "b", "c", "d"] {
@@ -3794,7 +3774,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         };
         let shape = |id: &str, ty: ElementType, content: &str| SlideElement {
             id: id.into(),
@@ -3808,7 +3788,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         };
 
         let mut deck = Vec::new();
@@ -3886,7 +3866,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         doc.slides[1].add_element(SlideElement {
             id: "elem-body".into(),
@@ -3900,7 +3880,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         doc.slides[1].add_element(SlideElement {
             id: "elem-stat".into(),
@@ -3914,7 +3894,7 @@ Hiring Plan
             action: None,
 
             style: Default::default(),
-            runs: Vec::new(),
+            ..Default::default()
         });
         doc.slides[1].speaker_notes = "Walk through the chart slowly.".into();
 

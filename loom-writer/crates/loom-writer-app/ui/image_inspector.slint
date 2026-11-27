@@ -1,0 +1,120 @@
+import { LoomSectionHeader, LoomButton } from "foundation.slint";
+
+export component ImageWrapInspector inherits Rectangle {
+    in property <bool> has-image: false;
+    in property <int> wrap-mode-index: 0;
+    in property <int> wrap-side-index: 0;
+    in property <int> wrap-align-index: 0;
+    in property <string> x-offset-label: "0 pt";
+    in property <string> y-offset-label: "0 pt";
+    in property <string> margin-left-label: "9 pt";
+    in property <string> margin-right-label: "9 pt";
+
+    callback set-wrap-mode(int);
+    callback set-wrap-side(int);
+    callback set-wrap-align(int);
+    callback step-x-offset(float);
+    callback step-y-offset(float);
+    callback step-wrap-margin(string, float);
+
+    visible: root.has-image;
+    height: root.has-image ? layout.preferred-height : 0px;
+
+    layout := VerticalLayout {
+        spacing: 6px;
+
+        LoomSectionHeader {
+            title: "Image Wrap";
+        }
+
+        HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Inline";
+                accessible-label: "Wrap mode: Inline";
+                clicked => { root.set-wrap-mode(0); }
+            }
+            LoomButton {
+                label: "Square";
+                accessible-label: "Wrap mode: Square";
+                clicked => { root.set-wrap-mode(1); }
+            }
+            LoomButton {
+                label: "Tight";
+                accessible-label: "Wrap mode: Tight";
+                clicked => { root.set-wrap-mode(2); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Top/Bot";
+                accessible-label: "Wrap mode: Top and Bottom";
+                clicked => { root.set-wrap-mode(3); }
+            }
+            LoomButton {
+                label: "Behind";
+                accessible-label: "Wrap mode: Behind Text";
+                clicked => { root.set-wrap-mode(4); }
+            }
+            LoomButton {
+                label: "In Front";
+                accessible-label: "Wrap mode: In Front of Text";
+                clicked => { root.set-wrap-mode(5); }
+            }
+        }
+
+        if root.wrap-mode-index == 1 || root.wrap-mode-index == 2 : HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Both";
+                accessible-label: "Wrap side: Both";
+                clicked => { root.set-wrap-side(0); }
+            }
+            LoomButton {
+                label: "Left";
+                accessible-label: "Wrap side: Left Only";
+                clicked => { root.set-wrap-side(1); }
+            }
+            LoomButton {
+                label: "Right";
+                accessible-label: "Wrap side: Right Only";
+                clicked => { root.set-wrap-side(2); }
+            }
+            LoomButton {
+                label: "Largest";
+                accessible-label: "Wrap side: Largest";
+                clicked => { root.set-wrap-side(3); }
+            }
+        }
+
+        if root.wrap-mode-index != 0 : HorizontalLayout {
+            spacing: 4px;
+            LoomButton {
+                label: "Left";
+                accessible-label: "Horizontal align: Left";
+                clicked => { root.set-wrap-align(0); }
+            }
+            LoomButton {
+                label: "Center";
+                accessible-label: "Horizontal align: Center";
+                clicked => { root.set-wrap-align(1); }
+            }
+            LoomButton {
+                label: "Right";
+                accessible-label: "Horizontal align: Right";
+                clicked => { root.set-wrap-align(2); }
+            }
+        }
+
+        if root.wrap-mode-index != 0 : HorizontalLayout {
+            spacing: 4px;
+            Text {
+                text: "X: " + root.x-offset-label + "  Y: " + root.y-offset-label;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

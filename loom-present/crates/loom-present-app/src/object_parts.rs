@@ -1014,6 +1014,7 @@ mod tests {
                 font_family: Some("Aptos Display".into()),
                 ..Default::default()
             },
+            ..Default::default()
         };
         let parts = parts_for(&element);
         assert_eq!(parts.len(), 1);
@@ -1040,6 +1041,7 @@ mod tests {
             rotation_deg: 0.0,
             action: None,
             style: Default::default(),
+            ..Default::default()
         };
         assert!(parts_for(&element).is_empty());
         assert_eq!(active_cell_for(&element).family.as_str(), "");
@@ -1109,6 +1111,7 @@ mod tests {
             action: None,
             style: Default::default(),
             runs: Vec::new(),
+            ..Default::default()
         };
         elem.style.underline = true;
         let parts = parts_for(&elem);
@@ -1141,6 +1144,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            ..Default::default()
         };
         let parts = parts_for(&elem);
         assert!(
@@ -1180,6 +1184,7 @@ mod tests {
             action: None,
             style: Default::default(),
             runs: Vec::new(),
+            ..Default::default()
         };
         elem.style.underline = true;
         let parts = parts_for(&elem);
@@ -1213,6 +1218,7 @@ mod tests {
             action: None,
             style: Default::default(),
             runs: long_runs,
+            ..Default::default()
         };
         let parts = parts_for(&elem);
         assert!(!parts.is_empty());

@@ -217,6 +217,64 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         });
     }
     window.on_close_presenter(close);
+    let tools = Rc::new(RefCell::new(
+        crate::presenter_tools::PresenterToolState::default(),
+    ));
+    {
+        let tools = tools.clone();
+        window.on_select_tool(move |idx| {
+            let tool = match idx {
+                1 => loom_present_core::AnnotationDrawingTool::Highlighter,
+                2 => loom_present_core::AnnotationDrawingTool::LaserPointer,
+                3 => loom_present_core::AnnotationDrawingTool::Eraser,
+                _ => loom_present_core::AnnotationDrawingTool::Pen,
+            };
+            tools.borrow_mut().set_tool(tool);
+        });
+    }
+    {
+        let tools = tools.clone();
+        let app = app.as_weak();
+        window.on_clear_annotations(move || {
+            let idx = app
+                .upgrade()
+                .map(|a| a.get_active_slide_index().max(0) as usize)
+                .unwrap_or(0);
+            tools.borrow_mut().clear_slide(idx);
+        });
+    }
+    {
+        let tools = tools.clone();
+        let w = window.as_weak();
+        window.on_jump_digit(move |s| {
+            if let Some(ch) = s.chars().next() {
+                tools.borrow_mut().push_jump_digit(ch);
+                if let Some(win) = w.upgrade() {
+                    win.set_jump_buffer(tools.borrow().jump_buffer.clone().into());
+                }
+            }
+        });
+    }
+    {
+        let tools = tools.clone();
+        let w = window.as_weak();
+        let app = app.as_weak();
+        window.on_commit_jump(move || {
+            let was_empty = tools.borrow().jump_buffer.is_empty();
+            if let Some(target) = tools.borrow_mut().commit_jump(usize::MAX) {
+                if let Some(a) = app.upgrade() {
+                    a.invoke_select_slide(target as i32);
+                }
+            } else if was_empty {
+                if let Some(a) = app.upgrade() {
+                    a.invoke_next_slide();
+                }
+            }
+            if let Some(win) = w.upgrade() {
+                win.set_jump_buffer("".into());
+            }
+        });
+    }
     window
         .window()
         .on_close_requested(|| slint::CloseRequestResponse::HideWindow);

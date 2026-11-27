@@ -39,6 +39,40 @@ pub(crate) fn general_text(n: f64) -> String {
     }
 }
 
+/// Unescapes the five predefined XML entities in a single left-to-right pass,
+/// so `&amp;lt;` correctly decodes to the literal `&lt;`. Unknown escapes pass
+/// through unchanged.
+pub(crate) fn xml_unescape(text: &str) -> String {
+    const ENTITIES: [(&str, &str); 5] = [
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", "\""),
+        ("&apos;", "'"),
+        ("&amp;", "&"),
+    ];
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(pos) = rest.find('&') {
+        out.push_str(&rest[..pos]);
+        let tail = &rest[pos..];
+        match ENTITIES.iter().find(|(name, _)| tail.starts_with(name)) {
+            Some((name, replacement)) => {
+                out.push_str(replacement);
+                rest = &tail[name.len()..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::general_text;

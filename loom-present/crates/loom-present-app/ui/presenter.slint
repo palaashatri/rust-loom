@@ -1,6 +1,7 @@
 import { Theme } from "theme.slint";
 import { LoomButton } from "foundation.slint";
 import { ThumbRows, MiniSlide } from "present_components.slint";
+import { PresenterToolBar } from "presenter_overlay.slint";
 export { ThumbRows, ObjectPart, ObjectParts, ElementInk } from "present_components.slint";
 
 // The presenter's own window: notes, what comes next, and a clock. It is a
@@ -32,18 +33,27 @@ export component PresenterWindow inherits Window {
     property <bool> roomy: false;
     changed height => { root.roomy = self.height >= 560px; }
 
+    in-out property <int> active-tool: 0;
+    in property <string> jump-buffer: "";
+
     callback next-slide();
     callback previous-slide();
     callback toggle-timer();
     callback reset-timer();
     callback close-presenter();
+    callback select-tool(int);
+    callback clear-annotations();
+    callback jump-digit(string);
+    callback commit-jump();
 
     init => { Theme.application = "present"; keys.focus(); root.roomy = self.height >= 560px; }
 
     keys := FocusScope {
         key-pressed(event) => {
             if (event.text == Key.Escape) { root.close-presenter(); }
-            else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == " " || event.text == Key.Return) { root.next-slide(); }
+            else if (event.text == Key.RightArrow || event.text == Key.DownArrow || event.text == Key.PageDown || event.text == " ") { root.next-slide(); }
+            else if (event.text == Key.Return) { root.commit-jump(); }
+            else if (event.text == "0" || event.text == "1" || event.text == "2" || event.text == "3" || event.text == "4" || event.text == "5" || event.text == "6" || event.text == "7" || event.text == "8" || event.text == "9") { root.jump-digit(event.text); }
             else if (event.text == Key.LeftArrow || event.text == Key.UpArrow || event.text == Key.PageUp || event.text == Key.Backspace) { root.previous-slide(); }
             return accept;
         }
@@ -190,6 +200,13 @@ export component PresenterWindow inherits Window {
                         Rectangle { vertical-stretch: 1; }
                     }
                 }
+            }
+
+            PresenterToolBar {
+                active-tool: root.active-tool;
+                jump-buffer: root.jump-buffer;
+                select-tool(t) => { root.active-tool = t; root.select-tool(t); }
+                clear-annotations => { root.clear-annotations(); }
             }
 
             HorizontalLayout {

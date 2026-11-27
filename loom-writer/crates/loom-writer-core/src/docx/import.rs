@@ -647,6 +647,7 @@ fn parse_picture(p_xml: &str, id: u64, archive: &PackageArchive) -> Option<RichB
             image.height_pt = cy / 12_700.0;
         }
     }
+    crate::image_wrap::apply_docx_anchor(&mut image, drawing, extract_attribute_value);
     let text = crate::images::picture_text(id as u32);
     let mut block = RichBlock::new(id, crate::IMAGE_BLOCK_KIND, &text);
     block.image = Some(image);

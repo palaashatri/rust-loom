@@ -24,6 +24,7 @@ mod metrics;
 mod placement;
 mod selection;
 mod shaped_line;
+mod wrap_exclusion;
 pub use footnote_layout::{FootnoteLinePlacement, FootnoteReferencePlacement};
 pub(crate) use metrics::{block_bidi_runs, block_positions};
 use placement::{Placer, Segment};
@@ -54,6 +55,7 @@ struct WrappedLine {
     start: usize,
     end: usize,
     advance_pt: f32,
+    x_offset_pt: f32,
     shaped_line: Option<Arc<WriterShapedVisualLine>>,
 }
 
@@ -171,6 +173,7 @@ fn wrapped(block: &RichBlock, font_size: f32, width: f32) -> BlockInfo {
                     advance_pt: shaped_line
                         .as_ref()
                         .map_or_else(|| measure.advance(start, end), |line| line.width_pt()),
+                    x_offset_pt: 0.0,
                     shaped_line,
                 }
             })
@@ -250,6 +253,7 @@ fn wrapped_with_inline_advances(
             start: range.start,
             end: range.end,
             advance_pt: shaped_line.as_ref().map_or(0.0, |line| line.width_pt()),
+            x_offset_pt: 0.0,
             shaped_line: shaped_line.map(Arc::new),
         })
         .collect::<Vec<_>>();
@@ -309,6 +313,8 @@ pub struct FlowLine {
     pub page: usize,
     /// Line bounds in viewport coordinates.
     pub bounds: PageRect,
+    /// Horizontal offset in points from the column left edge (for wrapped-image exclusion).
+    pub x_offset_pt: f32,
     /// Shared shaped line geometry and paint runs, if all faces were resolved.
     pub shaped_line: Option<Arc<WriterShapedVisualLine>>,
 }
@@ -854,6 +860,7 @@ impl WriterDocument {
                     global_start: block_starts[block_index] + source.start,
                     page: page.index,
                     bounds: fragment.bounds,
+                    x_offset_pt: 0.0,
                     shaped_line,
                 });
             }

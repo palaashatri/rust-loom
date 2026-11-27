@@ -404,6 +404,8 @@ fn oversized_picture_is_refused_with_accessible_error_label_and_fallback() {
         width_pt: 240.0,
         height_pt: 180.0,
         bytes: std::sync::Arc::new(bytes),
+        wrap: None,
+        wrap_y_offset_pt: 0.0,
     };
 
     let mut doc = WriterDocument::new("oversized-pic", "Oversized picture");

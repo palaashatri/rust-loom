@@ -192,6 +192,12 @@ impl PresentationSession {
 
             style: Default::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         self.selected_elements = vec![element_id.clone()];
         Ok(element_id)

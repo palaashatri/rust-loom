@@ -30,6 +30,8 @@ pub mod fonts;
 mod header_footer;
 #[cfg(test)]
 mod header_footer_tests;
+pub mod hyperlinks;
+pub mod image_wrap;
 mod images;
 mod layout;
 mod list_levels;
@@ -1920,19 +1922,7 @@ fn parse_blocks(raw: &str) -> Result<(Vec<RichBlock>, Vec<tables::LegacyBlock>),
 }
 
 fn parse_image(raw: &str) -> Result<Option<InlineImage>, WriterError> {
-    let fields = ContentParser::new(raw).parse()?;
-    let (mut name, mut data) = (String::new(), String::new());
-    let (mut width, mut height) = (None, None);
-    for (key, value) in &fields {
-        match key.as_str() {
-            "name" => name = json_value_text(value),
-            "data" => data = json_value_text(value),
-            "wpt" => width = json_value_text(value).parse().ok(),
-            "hpt" => height = json_value_text(value).parse().ok(),
-            _ => {}
-        }
-    }
-    Ok(images::image_from_fields(&name, width, height, &data))
+    images::parse_image(raw)
 }
 
 fn parse_runs(raw: &str) -> Result<Vec<loom_text::StyleRun>, WriterError> {
@@ -2007,7 +1997,7 @@ fn parse_f32_value(value: &JsonValue, target: &mut f32) {
     }
 }
 
-fn json_value_text(value: &JsonValue) -> String {
+pub(crate) fn json_value_text(value: &JsonValue) -> String {
     match value {
         JsonValue::String(value) | JsonValue::Raw(value) => value.clone(),
     }
@@ -2017,7 +2007,7 @@ fn json_value_text(value: &JsonValue) -> String {
 /// as loom_package's manifest parser but simpler; keeps the workspace
 /// dependency-free).
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum JsonValue {
+pub(crate) enum JsonValue {
     /// A decoded JSON string, retaining its type so a string "null" is not
     /// confused with the JSON null value used by optional character colors.
     String(String),
@@ -2025,7 +2015,7 @@ enum JsonValue {
     Raw(String),
 }
 
-struct ContentParser {
+pub(crate) struct ContentParser {
     bytes: Vec<u8>,
     pos: usize,
 }

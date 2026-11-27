@@ -170,6 +170,9 @@ pub(crate) fn master_palette(app: &WriterApp) -> Vec<PaletteCommand> {
         },
         cmd_entry("file.start_hub", "Open Start Hub…"),
         cmd_entry("file.templates", "Browse Templates…"),
+        cmd_entry("format.copy_style", "Copy Format"),
+        cmd_entry("format.apply_style", "Apply Format"),
+        cmd_entry("insert.hyperlink", "Insert Hyperlink…"),
         PaletteCommand {
             action: PaletteAction::NewFromSample,
             id: "writer.new-sample",

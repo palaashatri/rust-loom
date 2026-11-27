@@ -10,6 +10,7 @@ pub mod model;
 pub mod os;
 pub mod picture;
 pub mod sheets_interop;
+pub mod style_clipboard;
 pub mod tsv;
 
 pub use cf_html::{decode_cf_html, encode_cf_html};
@@ -20,6 +21,7 @@ pub use os::{
     set_mock_clipboard_fails, set_mock_clipboard_image, write_clipboard, ClipboardOsError,
 };
 pub use sheets_interop::{sheets_range_to_table, table_to_sheets_range, SheetsCellData};
+pub use style_clipboard::{FormatPainterMode, StyleClipboard};
 pub use tsv::{table_to_tsv, tsv_to_table};
 
 #[cfg(test)]

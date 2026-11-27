@@ -1,0 +1,44 @@
+import { Theme } from "theme.slint";
+import { LoomButton } from "foundation.slint";
+
+export component PresenterToolBar inherits HorizontalLayout {
+    in property <int> active-tool: 0; // 0: Pen, 1: Highlighter, 2: Laser, 3: Eraser
+    in property <string> jump-buffer: "";
+    callback select-tool(int);
+    callback clear-annotations();
+
+    spacing: Theme.tokens.space.xs;
+    alignment: start;
+
+    LoomButton {
+        label: "Pen";
+        variant: root.active-tool == 0 ? "primary" : "secondary";
+        clicked => { root.select-tool(0); }
+    }
+    LoomButton {
+        label: "Highlight";
+        variant: root.active-tool == 1 ? "primary" : "secondary";
+        clicked => { root.select-tool(1); }
+    }
+    LoomButton {
+        label: "Laser";
+        variant: root.active-tool == 2 ? "primary" : "secondary";
+        clicked => { root.select-tool(2); }
+    }
+    LoomButton {
+        label: "Eraser";
+        variant: root.active-tool == 3 ? "primary" : "secondary";
+        clicked => { root.select-tool(3); }
+    }
+    LoomButton {
+        label: "Clear";
+        clicked => { root.clear-annotations(); }
+    }
+
+    if root.jump-buffer != "" : Text {
+        text: "Go to: " + root.jump-buffer;
+        color: Theme.palette().accent;
+        font-size: Theme.type.body;
+        vertical-alignment: center;
+    }
+}

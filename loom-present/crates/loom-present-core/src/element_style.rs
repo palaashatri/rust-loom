@@ -338,6 +338,12 @@ mod tests {
             action: None,
             style,
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         }
     }
 

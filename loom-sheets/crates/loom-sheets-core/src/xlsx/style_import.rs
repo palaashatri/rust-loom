@@ -256,6 +256,7 @@ pub(super) fn parse_styles(xml: &str) -> StyleTable {
                 font_size: font.size,
                 text_color: font.color,
                 wrap,
+                ..Default::default()
             },
             alignment,
             number_lossy: number.lossy,

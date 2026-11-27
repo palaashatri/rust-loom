@@ -1,0 +1,88 @@
+import { LoomButton } from "foundation.slint";
+
+export component HyperlinkDialog inherits Rectangle {
+    in-out property <string> url-text: "";
+    in-out property <string> tooltip-text: "";
+    in property <string> error-text: "";
+
+    callback apply-link(string, string);
+    callback remove-link();
+    callback cancel();
+
+    width: 400px;
+    height: 220px;
+    background: #ffffff;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #d1d5db;
+
+    VerticalLayout {
+        spacing: 10px;
+        padding: 12px;
+
+        Text {
+            text: "Insert Hyperlink";
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        Rectangle {
+            height: 30px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: #d1d5db;
+            TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                vertical-alignment: center;
+                text <=> root.url-text;
+                accessible-role: text-input;
+                accessible-label: "Hyperlink URL";
+            }
+        }
+
+        Rectangle {
+            height: 30px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: #d1d5db;
+            TextInput {
+                x: 8px;
+                width: parent.width - 16px;
+                height: parent.height;
+                vertical-alignment: center;
+                text <=> root.tooltip-text;
+                accessible-role: text-input;
+                accessible-label: "Hyperlink Tooltip";
+            }
+        }
+
+        if root.error-text != "" : Text {
+            text: root.error-text;
+            color: #dc2626;
+            font-size: 11px;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            LoomButton {
+                label: "Remove";
+                accessible-label: "Remove hyperlink";
+                clicked => { root.remove-link(); }
+            }
+            LoomButton {
+                label: "Cancel";
+                accessible-label: "Cancel hyperlink dialog";
+                clicked => { root.cancel(); }
+            }
+            LoomButton {
+                label: "Apply";
+                accessible-label: "Apply hyperlink";
+                clicked => { root.apply-link(root.url-text, root.tooltip-text); }
+            }
+        }
+    }
+}

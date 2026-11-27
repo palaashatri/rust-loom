@@ -1,0 +1,26 @@
+/// Highlight rect for a traced precedent or dependent cell.
+export struct AuditHighlightRect {
+    x: length,
+    y: length,
+    w: length,
+    h: length,
+    is-precedent: bool,
+}
+
+/// Overlay rendering colored borders for Trace Precedents (blue) & Trace Dependents (green).
+export component FormulaAuditOverlay inherits Rectangle {
+    in property <[AuditHighlightRect]> highlights: [];
+    in property <bool> show-formulas: false;
+
+    background: transparent;
+
+    for item in highlights: Rectangle {
+        x: item.x;
+        y: item.y;
+        width: item.w;
+        height: item.h;
+        background: item.is-precedent ? #2563eb.with-alpha(0.10) : #16a34a.with-alpha(0.10);
+        border-width: 2px;
+        border-color: item.is-precedent ? #2563eb : #16a34a;
+    }
+}

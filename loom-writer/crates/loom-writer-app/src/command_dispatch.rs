@@ -58,6 +58,9 @@ pub(crate) fn shortcut_for_id(id: &str) -> &'static str {
         "format.italic" | "writer.style.italic" | "writer.style.italic-all" => {
             sc("Cmd+I", "Ctrl+I")
         }
+        "format.copy_style" => sc("Cmd+Opt+C", "Ctrl+Alt+C"),
+        "format.apply_style" => sc("Cmd+Opt+V", "Ctrl+Alt+V"),
+        "insert.hyperlink" => sc("Cmd+Shift+K", "Ctrl+Shift+K"),
         "format.underline" | "writer.style.underline" | "writer.style.underline-all" => {
             sc("Cmd+U", "Ctrl+U")
         }
@@ -168,6 +171,10 @@ pub(crate) fn dispatch_command(app: &WriterApp, id: &str) -> bool {
         "edit.paste" | "writer.paste" => app.invoke_paste(),
         "edit.find" => app.global::<FindBar>().invoke_open_requested(false),
         "edit.replace" => app.global::<FindBar>().invoke_open_requested(true),
+        "format.copy_style" => crate::format_painter::copy_format(app),
+        "format.copy_style_locked" => crate::format_painter::copy_format_locked(app),
+        "format.apply_style" => crate::format_painter::apply_format(app),
+        "insert.hyperlink" => {}
         "app.palette" | "help.shortcuts" => app.invoke_open_palette(),
         "help.welcome" => crate::welcome_guide::open(app),
         "review.word_count" => app.global::<WordCountState>().invoke_open_dialog(),

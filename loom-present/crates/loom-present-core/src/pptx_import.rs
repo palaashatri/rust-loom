@@ -453,6 +453,12 @@ fn parse_slide_shapes(slide_xml: &str) -> Vec<SlideElement> {
             action: None,
             style,
             runs,
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
     }
     elements
@@ -805,6 +811,12 @@ fn parse_slide_pictures(
 
                 style: Default::default(),
                 runs: Vec::new(),
+                effects: None,
+                group_id: None,
+                locked: false,
+                flip_h: false,
+                flip_v: false,
+                paragraphs: Vec::new(),
             });
         }
     }
@@ -903,6 +915,12 @@ mod tests {
 
             style: Default::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         s1.add_element(SlideElement {
             id: "body-1".to_string(),
@@ -917,6 +935,12 @@ mod tests {
 
             style: Default::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         doc.slides.push(s1);
 
@@ -1018,6 +1042,12 @@ mod tests {
 
             style: Default::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         doc.slides.push(s);
 
@@ -1070,6 +1100,12 @@ mod tests {
             action: None,
             style: ElementStyle::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         doc.slides[0].elements.push(SlideElement {
             id: "deco-1".to_string(),
@@ -1087,6 +1123,12 @@ mod tests {
                 ..Default::default()
             },
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         let session = crate::PresentationSession::new(doc);
         let bytes = crate::pptx_export::export_pptx(&session).expect("export");
@@ -1131,6 +1173,12 @@ mod tests {
                 ..Default::default()
             },
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         let s2 = crate::PresentationSession::new(doc2);
         let b2 = crate::pptx_export::export_pptx(&s2).expect("export2");

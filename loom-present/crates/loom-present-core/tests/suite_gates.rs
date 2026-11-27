@@ -112,6 +112,12 @@ fn test_sheets_range_pastes_as_present_table_and_exports_pptx_and_reimports() {
 
         style: Default::default(),
         runs: Vec::new(),
+        effects: None,
+        group_id: None,
+        locked: false,
+        flip_h: false,
+        flip_v: false,
+        paragraphs: Vec::new(),
     });
     slide.add_element(table_elem);
     doc.slides.clear();
@@ -206,6 +212,12 @@ fn test_sheets_chart_pastes_as_present_chart_and_exports_pptx_and_reimports() {
 
         style: Default::default(),
         runs: Vec::new(),
+        effects: None,
+        group_id: None,
+        locked: false,
+        flip_h: false,
+        flip_v: false,
+        paragraphs: Vec::new(),
     });
     slide.add_element(chart_elem);
     doc.slides.clear();

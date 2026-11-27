@@ -132,6 +132,41 @@ pub(crate) fn dispatch_command(app: &SheetsApp, id: &str) -> bool {
         "table.sort_desc" | "sheets.sort-desc" => app.invoke_sort_descending(),
         "table.freeze_header" | "sheets.freeze-header" => app.invoke_freeze_panes(),
         "table.unfreeze_panes" | "sheets.unfreeze-panes" => app.invoke_unfreeze_panes(),
+        "table.autofill_series" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_autofill_series(),
+        "table.hide_rows" => app.global::<crate::SheetsParityState>().invoke_hide_rows(),
+        "table.unhide_rows" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_unhide_rows(),
+        "table.hide_cols" => app.global::<crate::SheetsParityState>().invoke_hide_cols(),
+        "table.unhide_cols" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_unhide_cols(),
+        "table.freeze_selection" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_freeze_selection(),
+        "format.painter_copy" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_format_painter_copy(),
+        "format.painter_lock" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_format_painter_lock(),
+        "format.painter_apply" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_format_painter_apply(),
+        "formula.show_formulas" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_toggle_show_formulas(),
+        "formula.trace_precedents" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_trace_precedents(),
+        "formula.trace_dependents" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_trace_dependents(),
+        "formula.clear_audit" => app
+            .global::<crate::SheetsParityState>()
+            .invoke_clear_audit(),
         "sheets.delete_sheet" => app.invoke_delete_sheet(),
         "sheets.add_sheet" => app.invoke_add_sheet(),
         "sheets.organize" => app.invoke_organize(),
@@ -466,6 +501,7 @@ pub(crate) fn dispatch_shortcut(app: &SheetsApp, key: &str, shift: bool, alt: bo
         ("d", false, true) => "table.sort_desc",
         ("f", false, true) => "table.freeze_header",
         ("u", false, true) => "table.unfreeze_panes",
+        ("`", false, false) | ("~", true, false) | ("~", false, false) => "formula.show_formulas",
         ("b", false, true) => "format.borders",
         ("g", false, true) => "format.fill_cycle",
         ("g", true, true) => "format.merge",

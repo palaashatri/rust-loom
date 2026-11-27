@@ -85,12 +85,18 @@ pub fn preview_print_pages(
 ) -> Vec<PrintPagePreview> {
     let (width_pt, height_pt) = page_dimensions(options);
     let per_page = slides_per_page(options.layout);
-    let total = doc.slides.len();
-    if total == 0 {
+    let has_visible = doc.slides.iter().any(|s| !s.hidden);
+    let indices: Vec<usize> = doc
+        .slides
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !has_visible || !s.hidden)
+        .map(|(i, _)| i)
+        .collect();
+    if indices.is_empty() {
         return Vec::new();
     }
-    (0..total)
-        .collect::<Vec<_>>()
+    indices
         .chunks(per_page)
         .enumerate()
         .map(|(idx, chunk)| PrintPagePreview {
@@ -225,6 +231,12 @@ mod tests {
             action: None,
             style: Default::default(),
             runs: Vec::new(),
+            effects: None,
+            group_id: None,
+            locked: false,
+            flip_h: false,
+            flip_v: false,
+            paragraphs: Vec::new(),
         });
         let opts_num = PrintOptions {
             layout: PrintLayout::SingleSlide,
