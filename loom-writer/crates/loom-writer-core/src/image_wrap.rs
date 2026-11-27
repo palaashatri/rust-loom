@@ -115,6 +115,7 @@ pub(crate) fn apply_docx_anchor(
     drawing: &str,
     extract_attr: fn(&str, &str) -> Option<String>,
 ) {
+    let drawing = drawing.split("</w:drawing>").next().unwrap_or(drawing);
     if drawing.contains("<wp:anchor") {
         image.wrap = Some(parse_docx_anchor_wrap(drawing, extract_attr));
         image.wrap_y_offset_pt = parse_docx_anchor_y_offset(drawing);
