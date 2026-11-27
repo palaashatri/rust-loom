@@ -134,10 +134,19 @@ pub fn format_custom_number(value: f64, pattern: &str) -> String {
         let dec = count_decimals(section);
         return format_accounting(value, dec, "$");
     }
+    if section.trim().is_empty() {
+        return String::new();
+    }
     if section.contains('%') {
         let dec = count_decimals(section);
-        let pct = value * 100.0;
-        return format!("{:.*}%", dec as usize, pct);
+        let pct = (value * 100.0).abs();
+        let formatted = format!("{pct:.*}%", dec as usize);
+        if value < 0.0 && sections.len() >= 2 && section.contains('(') {
+            return format!("({formatted})");
+        } else if value < 0.0 && (sections.len() == 1 || section.contains('-')) {
+            return format!("-{formatted}");
+        }
+        return formatted;
     }
     if lower.contains("e+") || lower.contains("e-") {
         let dec = count_decimals(section);
@@ -166,7 +175,7 @@ pub fn format_custom_number(value: f64, pattern: &str) -> String {
 
     if use_parens {
         format!("({prefix}{num_str})")
-    } else if value < 0.0 && sections.len() == 1 {
+    } else if value < 0.0 && (sections.len() == 1 || section.contains('-')) {
         format!("-{prefix}{num_str}")
     } else {
         format!("{prefix}{num_str}")

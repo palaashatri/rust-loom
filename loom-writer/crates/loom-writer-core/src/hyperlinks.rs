@@ -76,6 +76,9 @@ impl HyperlinkTable {
 
     /// Removes any hyperlink overlapping `range` in `block_id`.
     pub fn remove(&mut self, block_id: u64, range: Range<usize>) -> bool {
+        if range.start >= range.end {
+            return false;
+        }
         let before = self.spans.len();
         self.spans.retain(|existing| {
             existing.block_id != block_id

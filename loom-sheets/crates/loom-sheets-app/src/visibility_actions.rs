@@ -37,8 +37,8 @@ pub fn unhide_selected_cols(sheet: &mut Sheet, range: CellRange) -> VisibilityUn
 pub fn freeze_panes_at_selection(sheet: &mut Sheet, selection: CellRange) -> VisibilityUndo {
     let prev_rows = sheet.freeze_rows;
     let prev_cols = sheet.freeze_cols;
-    sheet.freeze_rows = selection.start.row.saturating_sub(1);
-    sheet.freeze_cols = selection.start.col.saturating_sub(1);
+    sheet.freeze_rows = selection.start.row;
+    sheet.freeze_cols = selection.start.col;
     VisibilityUndo::FreezeChanged {
         prev_rows,
         prev_cols,
@@ -103,8 +103,8 @@ mod tests {
         assert!(!sheet.hidden_cols.contains(&4));
 
         let u3 = freeze_panes_at_selection(&mut sheet, sel);
-        assert_eq!(sheet.freeze_rows, 2);
-        assert_eq!(sheet.freeze_cols, 3);
+        assert_eq!(sheet.freeze_rows, 3);
+        assert_eq!(sheet.freeze_cols, 4);
         undo_visibility_action(&mut sheet, u3);
         assert_eq!(sheet.freeze_rows, 0);
         assert_eq!(sheet.freeze_cols, 0);

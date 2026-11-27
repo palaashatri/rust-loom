@@ -1,20 +1,20 @@
 //! Format Painter state machine wired to `loom_clipboard::StyleClipboard<CellStyle>`.
 
 use loom_clipboard::StyleClipboard;
-use loom_sheets_core::style::CellStyle;
+use loom_sheets_core::style::{CellAlignment, CellStyle};
 use loom_sheets_core::{CellRange, CellRef, Sheet};
 
 /// Undoable batch record for applying a painted style to a range.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatPainterUndo {
-    /// Previous styles for each cell in the target range.
-    pub previous: Vec<(CellRef, CellStyle)>,
+    /// Previous styles and alignments for each cell in the target range.
+    pub previous: Vec<(CellRef, CellStyle, CellAlignment)>,
 }
 
-/// Wrapper around `loom_clipboard::StyleClipboard<CellStyle>` for Sheets.
+/// Wrapper around `loom_clipboard::StyleClipboard<(CellStyle, CellAlignment)>` for Sheets.
 #[derive(Debug, Clone, Default)]
 pub struct SheetsFormatPainter {
-    clipboard: StyleClipboard<CellStyle>,
+    clipboard: StyleClipboard<(CellStyle, CellAlignment)>,
 }
 
 impl SheetsFormatPainter {
@@ -25,39 +25,39 @@ impl SheetsFormatPainter {
         }
     }
 
-    /// Captures the style of `cell` for a single application.
+    /// Captures the style and alignment of `cell` for a single application.
     pub fn pick_from_cell(&mut self, sheet: &Sheet, cell: CellRef) {
-        let style = sheet.cell_style(cell);
-        self.clipboard.pick(style);
+        self.clipboard
+            .pick((sheet.cell_style(cell), sheet.cell_alignment(cell)));
     }
 
-    /// Captures the style of `cell` for repeated (locked) applications.
+    /// Captures the style and alignment of `cell` for repeated (locked) applications.
     pub fn pick_locked_from_cell(&mut self, sheet: &Sheet, cell: CellRef) {
-        let style = sheet.cell_style(cell);
-        self.clipboard.pick_locked(style);
+        self.clipboard
+            .pick_locked((sheet.cell_style(cell), sheet.cell_alignment(cell)));
     }
 
-    /// Applies the armed style to every cell in `target`, returning an undo record
+    /// Applies the armed style and alignment to every cell in `target`, returning an undo record
     /// if Format Painter was active.
     pub fn apply_to_range(
         &mut self,
         sheet: &mut Sheet,
         target: CellRange,
     ) -> Option<FormatPainterUndo> {
-        let style = self.clipboard.apply_take()?;
+        let (style, align) = self.clipboard.apply_take()?;
         let mut previous = Vec::new();
         for row in target.start.row..=target.end.row {
             for col in target.start.col..=target.end.col {
                 let coord = CellRef { row, col };
-                previous.push((coord, sheet.cell_style(coord)));
+                previous.push((coord, sheet.cell_style(coord), sheet.cell_alignment(coord)));
                 sheet.set_cell_style(coord, style);
+                sheet.set_cell_alignment(coord, align);
             }
         }
         Some(FormatPainterUndo { previous })
     }
 
     /// Clears the armed style and returns to `Inactive`.
-    #[cfg(test)]
     pub fn cancel(&mut self) {
         self.clipboard.cancel();
     }
@@ -76,8 +76,9 @@ impl SheetsFormatPainter {
 /// Reverts a `FormatPainterUndo` on `sheet`.
 #[cfg(test)]
 pub fn undo_format_painter(sheet: &mut Sheet, undo: FormatPainterUndo) {
-    for (coord, prev_style) in undo.previous {
+    for (coord, prev_style, prev_align) in undo.previous {
         sheet.set_cell_style(coord, prev_style);
+        sheet.set_cell_alignment(coord, prev_align);
     }
 }
 

@@ -60,6 +60,36 @@ pub(crate) fn parse_docx_anchor_wrap(
         left_pt: dist_pt("distL", 9.0),
         right_pt: dist_pt("distR", 9.0),
     };
+    if let Some(pos_h) = drawing.split("<wp:positionH").nth(1) {
+        if let Some(rel) = extract_attr(pos_h, "relativeFrom") {
+            wrap.horizontal_anchor = match rel.as_str() {
+                "page" => HorizontalAnchor::Page,
+                "margin" => HorizontalAnchor::Margin,
+                _ => HorizontalAnchor::Column,
+            };
+        }
+        if let Some(s) = pos_h
+            .split("<wp:align>")
+            .nth(1)
+            .and_then(|r| r.split("</wp:align>").next())
+        {
+            wrap.horizontal_align = match s.trim() {
+                "left" => WrapHorizontalAlign::Left,
+                "center" => WrapHorizontalAlign::Center,
+                "right" => WrapHorizontalAlign::Right,
+                _ => wrap.horizontal_align,
+            };
+        }
+    }
+    if let Some(pos_v) = drawing.split("<wp:positionV").nth(1) {
+        if let Some(rel) = extract_attr(pos_v, "relativeFrom") {
+            wrap.vertical_anchor = match rel.as_str() {
+                "page" => VerticalAnchor::Page,
+                "margin" => VerticalAnchor::Margin,
+                _ => VerticalAnchor::Paragraph,
+            };
+        }
+    }
     wrap
 }
 

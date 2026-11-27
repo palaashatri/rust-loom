@@ -451,7 +451,9 @@ fn picture_paragraph(
                 format!("<wp:wrapSquare wrapText=\"{side_attr}\"/>")
             }
             loom_objects::ImageWrapMode::Tight => {
-                format!("<wp:wrapTight wrapText=\"{side_attr}\"/>")
+                format!(
+                    "<wp:wrapTight wrapText=\"{side_attr}\"><wp:wrapPolygon edited=\"0\"><wp:start x=\"0\" y=\"0\"/><wp:lineTo x=\"0\" y=\"21600\"/><wp:lineTo x=\"21600\" y=\"21600\"/><wp:lineTo x=\"21600\" y=\"0\"/><wp:lineTo x=\"0\" y=\"0\"/></wp:wrapPolygon></wp:wrapTight>"
+                )
             }
             loom_objects::ImageWrapMode::TopAndBottom => "<wp:wrapTopAndBottom/>".to_string(),
             loom_objects::ImageWrapMode::BehindText
@@ -459,7 +461,7 @@ fn picture_paragraph(
             | loom_objects::ImageWrapMode::Inline => "<wp:wrapNone/>".to_string(),
         };
         return format!(
-            "<w:p>{alignment}<w:r><w:drawing><wp:anchor distT=\"{dt}\" distB=\"{db}\" distL=\"{dl}\" distR=\"{dr}\" simplePos=\"0\" relativeHeight=\"251658240\" behindDoc=\"{behind}\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:simplePos x=\"0\" y=\"0\"/>\n         <wp:positionH relativeFrom=\"{h_rel}\">{pos_h}</wp:positionH>\n         <wp:positionV relativeFrom=\"{v_rel}\">{pos_v}</wp:positionV>\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         {graphic}\n         {wrap_xml}</wp:anchor></w:drawing></w:r></w:p>",
+            "<w:p>{alignment}<w:r><w:drawing><wp:anchor distT=\"{dt}\" distB=\"{db}\" distL=\"{dl}\" distR=\"{dr}\" simplePos=\"0\" relativeHeight=\"251658240\" behindDoc=\"{behind}\" locked=\"0\" layoutInCell=\"1\" allowOverlap=\"1\" xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\">\n         <wp:simplePos x=\"0\" y=\"0\"/>\n         <wp:positionH relativeFrom=\"{h_rel}\">{pos_h}</wp:positionH>\n         <wp:positionV relativeFrom=\"{v_rel}\">{pos_v}</wp:positionV>\n         <wp:extent cx=\"{cx}\" cy=\"{cy}\"/>\n         {wrap_xml}\n         <wp:docPr id=\"{id}\" name=\"Picture {index}\" descr=\"{name}\"/>\n         {graphic}</wp:anchor></w:drawing></w:r></w:p>",
             dt = emu(wrap.margins.top_pt),
             db = emu(wrap.margins.bottom_pt),
             dl = emu(wrap.margins.left_pt),

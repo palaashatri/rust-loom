@@ -63,7 +63,22 @@ fn parse_iso_date(s: &str) -> Option<(i32, u32, u32)> {
     let y: i32 = parts[0].parse().ok()?;
     let m: u32 = parts[1].parse().ok()?;
     let d: u32 = parts[2].parse().ok()?;
-    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+    if !(1..=12).contains(&m) || d < 1 {
+        return None;
+    }
+    let max_day = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
+        }
+        _ => 30,
+    };
+    if d > max_day {
         return None;
     }
     Some((y, m, d))
@@ -116,8 +131,7 @@ fn format_number(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 && v.abs() < 1e15 {
         format!("{}", v.round() as i64)
     } else {
-        let s = format!("{v:.6}");
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
+        format!("{v}")
     }
 }
 
@@ -292,6 +306,7 @@ pub fn generate_fill_values(
     let src_rows = (source.end.row - source.start.row + 1) as isize;
     let src_cols = (source.end.col - source.start.col + 1) as isize;
 
+    let mut vertical_filled = std::collections::HashMap::new();
     // Vertical fill (target extends above or below source)
     if target.start.row < source.start.row || target.end.row > source.end.row {
         for col in source.start.col..=source.end.col {
@@ -312,16 +327,23 @@ pub fn generate_fill_values(
                 let src_row_for_shift = source.start.row as isize + seq_index.rem_euclid(src_rows);
                 let delta_rows = row as i32 - src_row_for_shift as i32;
                 let cell = generate_value_at(&series, &src_cells, seq_index, 0, delta_rows);
-                out.push((CellRef { row, col }, cell));
+                let coord = CellRef { row, col };
+                vertical_filled.insert(coord, cell.clone());
+                out.push((coord, cell));
             }
         }
     }
 
-    // Horizontal fill (target extends left or right of source)
+    // Horizontal fill (target extends left or right of source), including corner rows
     if target.start.col < source.start.col || target.end.col > source.end.col {
-        for row in source.start.row..=source.end.row {
+        for row in target.start.row..=target.end.row {
             let src_cells: Vec<Option<&Cell>> = (source.start.col..=source.end.col)
-                .map(|c| sheet.cells.get(&CellRef { row, col: c }))
+                .map(|c| {
+                    let coord = CellRef { row, col: c };
+                    vertical_filled
+                        .get(&coord)
+                        .or_else(|| sheet.cells.get(&coord))
+                })
                 .collect();
             let raw_strs: Vec<&str> = src_cells
                 .iter()
@@ -365,7 +387,7 @@ pub fn double_click_fill_extent(source: CellRange, sheet: &Sheet) -> Option<Cell
         }
     };
 
-    let end_row = if source.start.col > 1 {
+    let end_row = if source.start.col >= 1 {
         check_col(source.start.col - 1)
     } else {
         None
