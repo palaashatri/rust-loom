@@ -60,13 +60,26 @@ pub(crate) fn parse_docx_anchor_wrap(
         left_pt: dist_pt("distL", 9.0),
         right_pt: dist_pt("distR", 9.0),
     };
-    if let Some(pos_h) = drawing.split("<wp:positionH").nth(1) {
+    if let Some(pos_h) = drawing
+        .split("<wp:positionH")
+        .nth(1)
+        .and_then(|s| s.split("</wp:positionH>").next())
+    {
         if let Some(rel) = extract_attr(pos_h, "relativeFrom") {
             wrap.horizontal_anchor = match rel.as_str() {
                 "page" => HorizontalAnchor::Page,
                 "margin" => HorizontalAnchor::Margin,
                 _ => HorizontalAnchor::Column,
             };
+        }
+        if let Some(s) = pos_h
+            .split("<wp:posOffset>")
+            .nth(1)
+            .and_then(|r| r.split("</wp:posOffset>").next())
+        {
+            if let Ok(emu) = s.trim().parse::<f32>() {
+                wrap.horizontal_align = WrapHorizontalAlign::OffsetPt(emu / 12_700.0);
+            }
         }
         if let Some(s) = pos_h
             .split("<wp:align>")
@@ -81,7 +94,11 @@ pub(crate) fn parse_docx_anchor_wrap(
             };
         }
     }
-    if let Some(pos_v) = drawing.split("<wp:positionV").nth(1) {
+    if let Some(pos_v) = drawing
+        .split("<wp:positionV")
+        .nth(1)
+        .and_then(|s| s.split("</wp:positionV>").next())
+    {
         if let Some(rel) = extract_attr(pos_v, "relativeFrom") {
             wrap.vertical_anchor = match rel.as_str() {
                 "page" => VerticalAnchor::Page,
@@ -91,6 +108,29 @@ pub(crate) fn parse_docx_anchor_wrap(
         }
     }
     wrap
+}
+
+pub(crate) fn apply_docx_anchor(
+    image: &mut crate::InlineImage,
+    drawing: &str,
+    extract_attr: fn(&str, &str) -> Option<String>,
+) {
+    if drawing.contains("<wp:anchor") {
+        image.wrap = Some(parse_docx_anchor_wrap(drawing, extract_attr));
+        image.wrap_y_offset_pt = parse_docx_anchor_y_offset(drawing);
+    }
+}
+
+pub(crate) fn parse_docx_anchor_y_offset(drawing: &str) -> f32 {
+    drawing
+        .split("<wp:positionV")
+        .nth(1)
+        .and_then(|s| s.split("</wp:positionV>").next())
+        .and_then(|pos_v| pos_v.split("<wp:posOffset>").nth(1))
+        .and_then(|r| r.split("</wp:posOffset>").next())
+        .and_then(|s| s.trim().parse::<f32>().ok())
+        .map(|emu| emu / 12_700.0)
+        .unwrap_or(0.0)
 }
 
 impl WriterDocument {

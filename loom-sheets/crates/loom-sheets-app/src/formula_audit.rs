@@ -43,7 +43,7 @@ impl AuditOverlayState {
         self.precedents.clear();
         let mut deps = Vec::new();
         for (coord, c) in sheet.cells.iter() {
-            if c.is_formula() && extract_cell_refs(&c.raw).contains(&cell) {
+            if c.is_formula() && formula_references_cell(&c.raw, cell) {
                 deps.push(*coord);
             }
         }
@@ -58,6 +58,71 @@ impl AuditOverlayState {
         self.precedents.clear();
         self.dependents.clear();
     }
+}
+
+fn formula_references_cell(formula: &str, target: CellRef) -> bool {
+    let bytes = formula.as_bytes();
+    let mut i = 0;
+    let mut in_quotes = false;
+    while i < bytes.len() {
+        if bytes[i] == b'"' {
+            in_quotes = !in_quotes;
+            i += 1;
+            continue;
+        }
+        if in_quotes {
+            i += 1;
+            continue;
+        }
+        if bytes[i].is_ascii_alphabetic() {
+            let start = i;
+            while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
+                i += 1;
+            }
+            let num_start = i;
+            while i < bytes.len() && bytes[i].is_ascii_digit() {
+                i += 1;
+            }
+            if i > num_start {
+                if let Some(first) = CellRef::parse(&formula[start..i]) {
+                    if i < bytes.len() && bytes[i] == b':' {
+                        let colon_end = i + 1;
+                        let mut j = colon_end;
+                        while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                            j += 1;
+                        }
+                        let j_num = j;
+                        while j < bytes.len() && bytes[j].is_ascii_digit() {
+                            j += 1;
+                        }
+                        if j > j_num {
+                            if let Some(second) = CellRef::parse(&formula[colon_end..j]) {
+                                let r0 = first.row.min(second.row);
+                                let r1 = first.row.max(second.row);
+                                let c0 = first.col.min(second.col);
+                                let c1 = first.col.max(second.col);
+                                if target.row >= r0
+                                    && target.row <= r1
+                                    && target.col >= c0
+                                    && target.col <= c1
+                                {
+                                    return true;
+                                }
+                                i = j;
+                                continue;
+                            }
+                        }
+                    }
+                    if first == target {
+                        return true;
+                    }
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    false
 }
 
 fn extract_cell_refs(formula: &str) -> Vec<CellRef> {
