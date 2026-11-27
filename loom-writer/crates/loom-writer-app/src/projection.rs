@@ -1137,6 +1137,7 @@ fn project_inner(
                                     selection_rects.iter_mut().find(|rect| rect.caret)
                                 {
                                     caret.has_color = true;
+                                    caret.table_cell = true;
                                     caret.color =
                                         slint::Color::from_argb_encoded(parse_hex_color(color));
                                 }
