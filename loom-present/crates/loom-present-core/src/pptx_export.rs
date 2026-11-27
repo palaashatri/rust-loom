@@ -157,9 +157,13 @@ fn text_body(content: &str, spec: &TextSpec, underline: bool, strikethrough: boo
         } else if let Some(rest) = trimmed.strip_prefix("- ") {
             ("<a:buChar char=\"•\"/>".to_string(), rest)
         } else if let Some((num, rest)) = trimmed.split_once(". ") {
-            if !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) {
+            if let Some(n) = num
+                .parse::<u16>()
+                .ok()
+                .filter(|&n| (1..=32767).contains(&n))
+            {
                 (
-                    format!("<a:buAutoNum type=\"arabicPeriod\" startAt=\"{num}\"/>"),
+                    format!("<a:buAutoNum type=\"arabicPeriod\" startAt=\"{n}\"/>"),
                     rest,
                 )
             } else {
