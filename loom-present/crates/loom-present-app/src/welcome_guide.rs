@@ -44,6 +44,9 @@ pub(crate) fn should_show_on_first_run() -> bool {
 
 /// Opens the 7-step Loom Present Welcome Guide at Step 1 and syncs platform shortcut labels.
 pub(crate) fn open(app: &PresentApp) {
+    app.global::<crate::StartHubState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
+    app.global::<crate::FindReplaceState>().set_open(false);
     let guide = app.global::<WelcomeGuideState>();
     guide.set_mod_key(SharedString::from(platform_mod_key()));
     guide.set_step(0);

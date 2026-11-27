@@ -187,3 +187,75 @@ fn named_ranges_and_data_validation_work_end_to_end() {
         Some("42")
     );
 }
+
+#[test]
+fn bug_s1_to_s4_regression_tests() {
+    let (app, state, menu) = test_app_and_state();
+    crate::rich_format_actions::wire(&app, &state, &menu);
+    crate::pivot_builder::wire(&app, &state, &menu);
+    crate::print_preview::wire_callbacks(&app, &state);
+    crate::start_hub::wire(&app, &state, &menu);
+    crate::object_actions::register_object_actions(&app, &state, &menu);
+    let dt = app.global::<DataToolsState>();
+
+    // BUG-S1: open_find_replace opens Find and increments find_focus_tick.
+    let initial_tick = dt.get_find_focus_tick();
+    assert!(dispatch_command(&app, "edit.find"));
+    assert!(dt.get_find_open());
+    assert_eq!(dt.get_find_focus_tick(), initial_tick + 1);
+
+    // BUG-S2 & BUG-S3: dispatch_shortcut for Start Hub vs Conditional Formatting vs worksheet-objects.
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "o", true, false
+    ));
+    assert!(app.global::<crate::StartHubState>().get_open());
+    app.global::<crate::StartHubState>().set_open(false);
+
+    let rf = app.global::<crate::CellRichFormat>();
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "o", true, true
+    ));
+    assert!(rf.get_cf_modal_open());
+
+    // ("o", false, true) stays sheets.worksheet-objects (does not open Conditional Formatting or Start Hub).
+    rf.set_cf_modal_open(false);
+    app.global::<crate::StartHubState>().set_open(false);
+    let _ = crate::command_dispatch::dispatch_shortcut(&app, "o", false, true);
+    assert!(!rf.get_cf_modal_open());
+    assert!(!app.global::<crate::StartHubState>().get_open());
+
+    // macOS Opt+Shift+O ("Ø"/"ø") and Opt+Shift+P ("∏"/"π") when alt == true.
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "Ø", true, true
+    ));
+    assert!(rf.get_cf_modal_open());
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "∏", true, true
+    ));
+    assert!(app.global::<crate::PivotBuilderState>().get_open());
+
+    // BUG-S4: Opening Start Hub / Conditional Formatting / Print Preview / Pivot Builder
+    // while Welcome Guide is open closes Welcome Guide.
+    app.set_welcome_open(true);
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "o", true, false
+    ));
+    assert!(!app.get_welcome_open());
+
+    app.set_welcome_open(true);
+    assert!(crate::command_dispatch::dispatch_shortcut(
+        &app, "o", true, true
+    ));
+    assert!(!app.get_welcome_open());
+
+    app.set_welcome_open(true);
+    assert!(dispatch_command(&app, "file.print"));
+    assert!(!app.get_welcome_open());
+    assert!(app.global::<crate::PrintPreviewState>().get_open());
+
+    app.set_welcome_open(true);
+    app.global::<crate::PivotBuilderState>()
+        .invoke_open_builder();
+    assert!(!app.get_welcome_open());
+    assert!(app.global::<crate::PivotBuilderState>().get_open());
+}

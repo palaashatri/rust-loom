@@ -26,7 +26,7 @@ export component LoomNumericField inherits Rectangle {
     border-width: input.has-focus ? 2px : 1px;
     border-color: root.invalid ? Theme.palette().danger
         : input.has-focus ? Theme.palette().focus
-        : Theme.palette().ink-secondary;
+        : Theme.palette().border-strong;
     background: root.enabled ? Theme.palette().surface : Theme.palette().surface-sunken;
     accessible-role: AccessibleRole.none;
 

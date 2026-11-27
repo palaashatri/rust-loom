@@ -300,6 +300,7 @@ pub(crate) fn unmerge_selection(
 
 /// Open the Conditional Formatting modal for the current selection.
 pub(crate) fn open_conditional_formatting(app: &SheetsApp, state: &GuiState) {
+    app.set_welcome_open(false);
     let range = selection_from_app(app).range();
     refresh_cf_modal(app, &state.current.borrow(), range);
     app.global::<CellRichFormat>().set_cf_modal_open(true);

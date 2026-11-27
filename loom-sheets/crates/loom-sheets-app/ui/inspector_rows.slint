@@ -353,25 +353,64 @@ export component SheetTextColorRow inherits VerticalLayout {
 
 /// A group of choice buttons, the current one filled; first choice at the
 /// reading-start edge.
-export component SheetChoiceRow inherits HorizontalLayout {
+export component SheetChoiceRow inherits Rectangle {
     in property <[string]> choices: [];
     // Spoken names for the choices whose captions are symbols ("123", "$").
     in property <[string]> choice-names: [];
     in property <int> current: 0;
     callback chosen(int);
 
-    spacing: Theme.tokens.space.xs;
-    alignment: Theme.rtl ? end : start;
-    for slot in root.choices.length : LoomButton {
-        property <int> k: Theme.rtl ? root.choices.length - 1 - slot : slot;
-        label: root.choices[self.k];
-        accessible-name: root.choice-names.length > self.k ? root.choice-names[self.k] : "";
-        variant: root.current == self.k ? "primary" : "ghost";
-        selected: root.current == self.k;
-        // The chosen option is announced as well as painted, so a screen-reader
-        // user can tell which number format or alignment is active.
-        accessible-checkable: true;
-        accessible-checked: root.current == self.k;
-        clicked => { root.chosen(self.k); }
+    background: Theme.palette().surface-sunken;
+    border-radius: Theme.tokens.metrics.radius-medium;
+    border-width: 1px;
+    border-color: Theme.palette().border;
+
+    HorizontalLayout {
+        padding: 0px;
+        spacing: 0px;
+        for slot in root.choices.length : Rectangle {
+            property <int> k: Theme.rtl ? root.choices.length - 1 - slot : slot;
+            property <bool> active: root.current == self.k;
+            horizontal-stretch: 1;
+            min-height: 28px;
+            border-radius: Theme.tokens.metrics.radius-small;
+            background: self.active ? Theme.palette().surface-raised : transparent;
+            border-width: choice-focus.has-focus ? 2px : (self.active ? 1px : 0px);
+            border-color: choice-focus.has-focus ? Theme.palette().focus : (self.active ? Theme.palette().border : transparent);
+            accessible-role: AccessibleRole.button;
+            accessible-label: root.choice-names.length > self.k ? root.choice-names[self.k] : root.choices[self.k];
+            // The chosen option is announced as well as painted, so a screen-reader
+            // user can tell which number format or alignment is active.
+            accessible-checkable: true;
+            accessible-checked: self.active;
+            accessible-action-default => { root.chosen(self.k); }
+
+            Text {
+                text: root.choices[parent.k];
+                color: parent.active ? Theme.palette().ink : Theme.palette().ink-secondary;
+                font-size: Theme.tokens.typography.caption * Theme.text-scale;
+                font-weight: parent.active ? 600 : 500;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            choice-focus := FocusScope {
+                key-pressed(event) => {
+                    if (event.text == Key.Return || event.text == " ") {
+                        root.chosen(parent.k);
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    choice-focus.focus();
+                    root.chosen(parent.k);
+                }
+            }
+        }
     }
 }

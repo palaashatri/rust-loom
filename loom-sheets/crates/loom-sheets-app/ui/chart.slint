@@ -3,6 +3,7 @@ import { Theme } from "theme.slint";
 import { Doc } from "doc_palette.slint";
 import { SheetChartConfig } from "chart_inspector.slint";
 import { SheetChartPieLegend, SheetChartLegendBar } from "chart_legend.slint";
+import { SheetChartHeader } from "chart_header.slint";
 
 export component SheetChart inherits Rectangle {
     in property <string> title: "Chart";
@@ -178,52 +179,26 @@ export component SheetChart inherits Rectangle {
         spacing: root.text-scale > 1.0 ? Theme.tokens.space.xs : Theme.tokens.space.sm;
 
         // Chart Header
-        HorizontalLayout {
-            spacing: Theme.tokens.space.sm;
-            cross-axis-alignment: center;
-
-            Text {
-                text: root.title;
-                font-size: Theme.tokens.typography.body-large * root.text-scale;
-                font-weight: 700;
-                color: Theme.palette().paper-ink;
-                horizontal-stretch: 1;
-                overflow: elide;
-            }
-
-            Rectangle {
-                background: Theme.palette().surface;
-                HorizontalLayout {
-                    LoomButton {
-                        variant: "ghost";
-                        label: root.kind-label();
-                        clicked => {
-                            root.cycle-kind();
-                        }
-                    }
-
-                    LoomIconButton {
-                        icon: "close";
-                        label: "Hide chart panel";
-                        tooltip: "Hide the chart preview and keep the chart in the worksheet.";
-                        clicked => { root.close-chart(); }
-                    }
-                }
-            }
+        SheetChartHeader {
+            title: root.title;
+            kind-label: root.kind-label();
+            text-scale: root.text-scale;
+            cycle-kind => { root.cycle-kind(); }
+            close-chart => { root.close-chart(); }
         }
 
         Text {
             text: "Source: " + root.source-range + " · Series: " + root.series-label + " · Unit: " + root.unit-label;
             width: parent.width;
             overflow: elide;
-            color: Theme.palette().paper-ink;
+            color: Doc.muted;
             font-size: Theme.tokens.typography.caption * root.text-scale;
         }
         chart-guidance-text := Text {
             text: root.chart-guidance();
             accessible-label: root.chart-guidance();
             wrap: word-wrap;
-            color: Theme.palette().paper-ink;
+            color: Doc.muted;
             font-size: Theme.tokens.typography.caption * root.text-scale;
         }
         if SheetChartConfig.chart-exists && (SheetChartConfig.show-legend || SheetChartConfig.x-axis-label != "" || SheetChartConfig.y-axis-label != "") : SheetChartLegendBar {
@@ -436,24 +411,32 @@ export component SheetChart inherits Rectangle {
                         height: bar-column.bar-shape-height;
                         background: Doc.accent;
                         border-width: idx == root.selected-point ? 2px : 0px;
-                        border-color: Theme.palette().paper-ink;
+                        border-color: Theme.palette().ink;
                         border-radius: 3px;
                         drop-shadow-blur: 2px;
                         drop-shadow-color: Theme.palette().shadow;
                     }
 
-                    bar-value-text := Text {
-                        x: 0px;
-                        width: parent.width;
+                    Rectangle {
+                        x: (parent.width - self.width) / 2;
+                        width: min(parent.width, bar-value-text.preferred-width + 6px);
                         height: bar-column.value-label-height;
                         y: max(0px, bar-column.bar-shape-y - self.height - 2px * max(1.0, root.text-scale));
-                        text: idx < root.values-display.length ? root.values-display[idx] : "";
-                        font-size: Theme.tokens.typography.micro * root.text-scale;
-                        font-weight: 600;
-                        color: Theme.palette().paper-ink;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        overflow: elide;
+                        background: Doc.well;
+                        border-radius: 2px;
+                        bar-value-text := Text {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            text: idx < root.values-display.length ? root.values-display[idx] : "";
+                            font-size: Theme.tokens.typography.micro * root.text-scale;
+                            font-weight: 600;
+                            color: Theme.palette().paper-ink;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
                     }
 
                     bar-category-text := Text {

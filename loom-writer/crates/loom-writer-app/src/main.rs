@@ -391,8 +391,6 @@ fn schedule_menu_action(
         })
 }
 
-// ── Authoritative Writer CommandRegistry (loom-command) ──────────────────────
-// This catalog is the single source of truth for every Writer command. Toolbar,
 // native menu, keyboard shortcuts, command palette, context menu and accessibility
 // all dispatch through the same `CommandId`; `registry.invoke` enforces honest
 // enablement and all palette filtering goes through `registry.search`.
@@ -1430,13 +1428,15 @@ fn compute_render_projection(
     doc: &WriterDocument,
     viewport: PageViewport,
 ) -> ComputedProjection {
+    let hc = Theme::get(app).get_active_theme() == "high-contrast";
     ComputedProjection {
-        projection: projection::project_with_viewport_scale(
+        projection: projection::project_with_viewport_scale_and_theme(
             doc,
             viewport,
             app.get_view_width(),
             Some(app.get_page_view_height()),
             app.window().scale_factor(),
+            hc,
         ),
         page_style: doc.page.page_style(),
         match_rects: find_bar::match_rects(app, doc),
@@ -3838,7 +3838,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
         }
     }
     // A choice from any surface refreshes the menu check marks.
-    appearance::on_change(|app| app.invoke_view_state_changed());
+    let s_theme = state.clone();
+    appearance::on_change(move |app| {
+        apply_document(app, &s_theme.current.borrow());
+        app.invoke_view_state_changed();
+    });
     window_chrome::on_change(|app| app.invoke_view_state_changed());
     let app_ref = app.as_weak();
     let registry_for_menu = state.registry.clone();

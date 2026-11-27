@@ -1,4 +1,4 @@
-import { LoomButton } from "foundation.slint";
+import { LoomButton, LoomIconButton, LoomToggle } from "foundation.slint";
 import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 
@@ -91,12 +91,9 @@ export component FindReplaceModal inherits Rectangle {
                         font-size: Theme.type.caption;
                         vertical-alignment: center;
                     }
-                    LoomButton {
-                        width: 28px;
-                        height: 28px;
+                    LoomIconButton {
                         icon: "close";
-                        variant: "ghost";
-                        accessible-name: "Close Find & Replace";
+                        label: "Close Find & Replace";
                         clicked => { FindReplaceState.close-modal(); }
                     }
                 }
@@ -170,22 +167,18 @@ export component FindReplaceModal inherits Rectangle {
 
             // Toggles
             HorizontalLayout {
-                spacing: Theme.tokens.space.sm;
-                LoomButton {
-                    label: FindReplaceState.case-sensitive ? "Case: On" : "Case: Off";
-                    variant: FindReplaceState.case-sensitive ? "primary" : "secondary";
-                    accessible-name: "Toggle Case Sensitive";
-                    clicked => {
-                        FindReplaceState.case-sensitive = !FindReplaceState.case-sensitive;
+                spacing: Theme.tokens.space.lg;
+                LoomToggle {
+                    label: "Match case";
+                    checked <=> FindReplaceState.case-sensitive;
+                    toggled => {
                         FindReplaceState.query-changed(FindReplaceState.query);
                     }
                 }
-                LoomButton {
-                    label: FindReplaceState.include-notes ? "Notes: On" : "Notes: Off";
-                    variant: FindReplaceState.include-notes ? "primary" : "secondary";
-                    accessible-name: "Toggle Include Speaker Notes";
-                    clicked => {
-                        FindReplaceState.include-notes = !FindReplaceState.include-notes;
+                LoomToggle {
+                    label: "Include notes";
+                    checked <=> FindReplaceState.include-notes;
+                    toggled => {
                         FindReplaceState.query-changed(FindReplaceState.query);
                     }
                 }

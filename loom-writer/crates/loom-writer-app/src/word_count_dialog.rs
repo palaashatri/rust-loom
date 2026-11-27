@@ -89,6 +89,9 @@ pub(crate) fn refresh_for_doc(app: &WriterApp, doc: &WriterDocument) {
 
 /// Opens the Word Count & Document Statistics modal for `doc`.
 pub(crate) fn open_document(app: &WriterApp, doc: &WriterDocument) {
+    app.global::<crate::WelcomeGuideState>().set_open(false);
+    app.global::<crate::StartHubState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
     refresh_for_doc(app, doc);
     app.global::<WordCountState>().set_open(true);
     app.set_status_left("Opened Word Count & Document Statistics".into());

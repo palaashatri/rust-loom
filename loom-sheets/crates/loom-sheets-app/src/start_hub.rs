@@ -199,6 +199,13 @@ pub(crate) fn sync_recents_to_app(app: &SheetsApp) {
 
 /// Open the Step 1 Start / Recents Hub modal.
 pub(crate) fn open_hub(app: &SheetsApp) {
+    app.set_welcome_open(false);
+    app.global::<crate::PivotBuilderState>().set_open(false);
+    app.global::<crate::PrintPreviewState>().set_open(false);
+    let dt = app.global::<crate::DataToolsState>();
+    dt.set_find_open(false);
+    dt.set_filter_popup_open(false);
+    dt.set_named_ranges_open(false);
     let hub = app.global::<StartHubState>();
     hub.set_search_query(SharedString::default());
     hub.set_sidebar_tab(0);

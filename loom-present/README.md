@@ -2,13 +2,32 @@
 
 Loom Present is a local-first presentation editor. Decks are open, inspectable `.loomdeck` packages on your own computer; nothing is uploaded and no account is needed. It exports PDF and PowerPoint `.pptx`.
 
-**Platforms:** Windows x86-64 and Linux x86-64. macOS is out of scope for v1 and is not claimed.
+**Platforms verified (2026-11-24):** macOS (`aarch64-apple-darwin`), Windows (`x86_64-pc-windows-msvc`), and Linux (`x86_64-unknown-linux-gnu`).
 
-**Status: `ACCEPTANCE_BLOCKED`.** The 2026-10-18 acceptance record was retracted by the supervisor (unverified evidence, no shown independent review); this is not a production-ready claim. The live ledger is the current-truth section of the repository `AGENTS.md`; this README lists what has evidence behind it and what does not.
+**Status: `ACCEPTANCE_BLOCKED` (within `office-v1`; suite gate stays `ACCEPTANCE_BLOCKED` pending Gate 2 human visual sign-off).** The live gate and application quality table live in [docs/workflow/current.md](../docs/workflow/current.md), and the 2026-11-24 verification ledger lives in [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#pr-28-audit-remediation--macos-visualfunctional-parity-audit--2026-11-24).
 
 Evidence tags used below:
 
-- **[tests]** covered by automated tests. The 2026-10-19 Windows serial workspace run passed 375 tests, with zero failures and two ignored (app 265, core 79); commands and scoped results are in the live ledger. This does not replace native or interoperability checks.
+- **[tests]** covered by automated tests. On 2026-11-24, `cargo test --manifest-path loom-present/Cargo.toml --workspace --locked` passed across 13 suites (`495 passed; 0 failed; 2 ignored`).
+
+## Visual feature tour
+
+| Feature | Preview |
+|---|---|
+| **Start Hub & Recents** | ![Loom Present Start Hub](docs/screenshots/start-hub.png) |
+| **Theme & Template Chooser** (including Minimal Stage) | ![Loom Present Theme Chooser](docs/screenshots/theme-chooser.png) |
+| **Interactive Welcome Guide** | ![Loom Present Welcome Guide](docs/screenshots/welcome-guide.png) |
+| **Slide Editor & Scaled Thumbnail Navigator** | ![Loom Present Slide Editor and Navigator](docs/screenshots/slide-editor-navigator.png) |
+| **Rich Text, Font Picker & Transform Inspector** | ![Loom Present Rich Text and Formatting](docs/screenshots/rich-text-and-formatting.png) |
+| **Tables, Charts & Shapes** | ![Loom Present Tables Charts and Shapes](docs/screenshots/tables-charts-and-shapes.png) |
+| **Arrange, Alignment & Z-Order Inspector** | ![Loom Present Arrange and Alignment](docs/screenshots/arrange-and-alignment.png) |
+| **Speaker Notes & Slide Transitions** | ![Loom Present Speaker Notes and Animate](docs/screenshots/speaker-notes-and-animate.png) |
+| **Document Inspector (16:9 / 4:3 & Theme)** | ![Loom Present Document Inspector](docs/screenshots/document-inspector.png) |
+| **Find & Replace** | ![Loom Present Find and Replace](docs/screenshots/find-and-replace.png) |
+| **Command Palette (`Cmd+K`)** | ![Loom Present Command Palette](docs/screenshots/command-palette.png) |
+| **Print Preview & Handouts** | ![Loom Present Print Preview](docs/screenshots/print-preview.png) |
+| **Presenter View** | ![Loom Present Presenter View](docs/screenshots/presenter-view.png) |
+| **High-Contrast Appearance** | ![Loom Present High Contrast](docs/screenshots/theme-high-contrast.png) |
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu).
 

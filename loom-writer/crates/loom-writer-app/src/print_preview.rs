@@ -754,6 +754,9 @@ fn project_preview_snapshot(
 
 /// Opens the interactive Print Preview & Page Setup modal synced to `doc`.
 pub(crate) fn open_document(app: &WriterApp, doc: &WriterDocument) {
+    app.global::<crate::WelcomeGuideState>().set_open(false);
+    app.global::<crate::StartHubState>().set_open(false);
+    app.global::<crate::WordCountState>().set_open(false);
     let preview = app.global::<PrintPreviewState>();
     preview.set_paper_size(paper_to_index(doc.page.paper));
     preview.set_orientation(orientation_to_index(doc.page.orientation));

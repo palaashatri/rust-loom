@@ -32,14 +32,14 @@ export component IconOverLabelToolbarItem inherits Rectangle {
     background: !root.enabled ? transparent
         : touch.pressed ? Theme.palette().surface-sunken
         : root.checked ? Theme.palette().selection-soft
-        : touch.has-hover ? Theme.palette().surface-raised
+        : touch.has-hover ? Theme.palette().surface-sunken
         : transparent;
     accessible-role: button;
     accessible-label: root.accessible-name != "" ? root.accessible-name : root.label != "" ? root.label : root.icon;
     accessible-action-default => { if (root.enabled) { root.clicked(); } }
 
     VerticalLayout {
-        spacing: 2px; padding-top: 4px; padding-bottom: 4px; padding-left: 4px; padding-right: 4px;
+        spacing: 3px; padding-top: 4px; padding-bottom: 4px; padding-left: 6px; padding-right: 6px;
         alignment: center; cross-axis-alignment: center;
         Icon {
             size: 18px * max(1.0, Theme.text-scale); icon: root.icon;
@@ -65,7 +65,9 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         height: max(0px, root.height - 2 * Theme.tokens.metrics.focus-offset);
         border-radius: max(0px, Theme.tokens.metrics.radius-medium - Theme.tokens.metrics.focus-offset);
         border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : root.checked ? 1px : 0px;
-        border-color: focus.has-focus ? Theme.palette().focus : root.checked ? Theme.palette().accent : transparent;
+        border-color: focus.has-focus ? Theme.palette().focus
+            : root.checked ? (Theme.active-theme == "high-contrast" ? Theme.palette().accent : Theme.palette().accent.with-alpha(0.35))
+            : transparent;
         background: transparent;
     }
     focus := FocusScope {

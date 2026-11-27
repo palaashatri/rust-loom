@@ -60,6 +60,22 @@ redistributable = true
 attribution_required = false
 
 [[allow]]
+glob = "docs/screenshots/*.png"
+origin = "Loom project-generated macOS application screenshot (2026-11-24)"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
+glob = "loom-*/docs/screenshots/*.png"
+origin = "Loom project-generated macOS application screenshot (2026-11-24)"
+license = "Repository project license"
+commercial = true
+redistributable = true
+attribution_required = false
+
+[[allow]]
 glob = "docs/qa/*.png"
 origin = "Loom project-generated QA screenshot"
 license = "Repository project license"

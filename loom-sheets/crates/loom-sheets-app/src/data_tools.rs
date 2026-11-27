@@ -57,9 +57,14 @@ pub(super) fn commit_sheet_metadata_edit(
 }
 
 pub(crate) fn open_find_replace(app: &SheetsApp, replace_mode: bool) {
+    if app.global::<crate::PrintPreviewState>().get_open() {
+        return;
+    }
     let dt = app.global::<DataToolsState>();
     dt.set_find_replace_mode(replace_mode);
     dt.set_find_open(true);
+    let next = dt.get_find_focus_tick().wrapping_add(1).max(1);
+    dt.set_find_focus_tick(next);
     dt.set_find_status(SharedString::default());
 }
 

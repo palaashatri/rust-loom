@@ -295,6 +295,8 @@ pub(crate) fn wire(app: &SheetsApp, state: &Rc<GuiState>, menu_service: &Arc<Nat
                 let next = init_session_for_range(&sheet, range);
                 *session.borrow_mut() = next;
                 publish_session(&app, &sheet, &session.borrow());
+                app.set_welcome_open(false);
+                app.global::<crate::StartHubState>().set_open(false);
                 app.global::<PivotBuilderState>().set_open(true);
             }
         });

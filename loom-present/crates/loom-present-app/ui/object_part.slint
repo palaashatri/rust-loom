@@ -204,9 +204,11 @@ export component ObjectPartView inherits Rectangle {
     }
 
     txt := Text {
-        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale : 4px;
+        x: root.part.pad ? Theme.tokens.space.sm * root.text-scale
+            : root.part.shape-kind != "" ? 12px * root.text-scale : 4px;
         y: root.part.pad ? Theme.tokens.space.xs * root.text-scale : 0px;
         width: root.part.pad ? max(1px, parent.width - Theme.tokens.space.lg * 2 * root.text-scale)
+            : root.part.shape-kind != "" ? max(1px, parent.width - 24px * root.text-scale)
             : max(1px, parent.width - 8px);
         height: root.part.pad ? max(1px, parent.height - Theme.tokens.space.sm * 2 * root.text-scale)
             : parent.height;

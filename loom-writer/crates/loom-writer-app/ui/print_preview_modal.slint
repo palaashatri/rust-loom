@@ -1,4 +1,4 @@
-import { LoomButton, LoomPanel, LoomSectionHeader } from "foundation.slint";
+import { LoomButton, LoomPanel } from "foundation.slint";
 import { Theme } from "theme.slint";
 
 export struct PrintPreviewTextLine {
@@ -304,7 +304,7 @@ export component PrintPreviewModal inherits Rectangle {
                         }
 
                         pager-bar := Rectangle {
-                            height: max(prev-btn.preferred-height, page-status.preferred-height);
+                            height: max(Theme.scaled-control-height, max(prev-btn.preferred-height, page-status.preferred-height));
 
                             pager-inner := Rectangle {
                                 property <length> gap: Theme.tokens.space.md;
@@ -317,7 +317,7 @@ export component PrintPreviewModal inherits Rectangle {
                                     x: Theme.rtl ? parent.width - self.width : 0px;
                                     y: (parent.height - self.height) / 2;
                                     width: self.preferred-width;
-                                    height: self.preferred-height;
+                                    height: max(Theme.scaled-control-height, self.preferred-height);
                                     label: "Prev Page";
                                     icon: Theme.rtl ? "chevron-right" : "chevron-left";
                                     variant: "secondary";
@@ -340,7 +340,7 @@ export component PrintPreviewModal inherits Rectangle {
                                     x: Theme.rtl ? 0px : parent.width - self.width;
                                     y: (parent.height - self.height) / 2;
                                     width: self.preferred-width;
-                                    height: self.preferred-height;
+                                    height: max(Theme.scaled-control-height, self.preferred-height);
                                     label: "Next Page";
                                     icon: Theme.rtl ? "chevron-left" : "chevron-right";
                                     variant: "secondary";
@@ -373,7 +373,7 @@ export component PrintPreviewModal inherits Rectangle {
                         spacing: Theme.tokens.space.md;
 
                         setup-header := Rectangle {
-                            height: max(setup-title.preferred-height, close-btn.preferred-height);
+                            height: max(setup-title.preferred-height, close-btn.height);
 
                             setup-title := Text {
                                 x: Theme.rtl ? close-btn.preferred-width + Theme.tokens.space.sm : 0px;
@@ -392,7 +392,7 @@ export component PrintPreviewModal inherits Rectangle {
                                 x: Theme.rtl ? 0px : parent.width - self.width;
                                 y: (parent.height - self.height) / 2;
                                 width: self.preferred-width;
-                                height: self.preferred-height;
+                                height: max(Theme.scaled-control-height, self.preferred-height);
                                 label: "Close";
                                 icon: "close";
                                 variant: "ghost";
@@ -401,87 +401,97 @@ export component PrintPreviewModal inherits Rectangle {
                             }
                         }
 
-                        LoomSectionHeader { title: "Page Setup"; detail: "Live preview"; }
-
                         Flickable {
                             vertical-stretch: 1;
                             viewport-height: setup-fields.preferred-height;
 
                             setup-fields := VerticalLayout {
                                 width: parent.width;
-                                spacing: Theme.tokens.space.md;
+                                spacing: Theme.tokens.space.lg;
 
-                                SetupOptionLabel { text: "Paper Size"; }
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.sm;
-                                    a4-btn := SetupChoiceButton {
-                                        label: "A4";
-                                        a11y: "Paper Size A4";
-                                        active: PrintPreviewState.paper-size == 0;
-                                        clicked => { PrintPreviewState.paper-size = 0; PrintPreviewState.settings-changed(); }
-                                    }
-                                    letter-btn := SetupChoiceButton {
-                                        label: "US Letter";
-                                        a11y: "Paper Size US Letter";
-                                        active: PrintPreviewState.paper-size == 1;
-                                        clicked => { PrintPreviewState.paper-size = 1; PrintPreviewState.settings-changed(); }
+                                VerticalLayout {
+                                    spacing: Theme.tokens.space.xs;
+                                    SetupOptionLabel { text: "Paper Size"; }
+                                    HorizontalLayout {
+                                        spacing: Theme.tokens.space.sm;
+                                        a4-btn := SetupChoiceButton {
+                                            label: "A4";
+                                            a11y: "Paper Size A4";
+                                            active: PrintPreviewState.paper-size == 0;
+                                            clicked => { PrintPreviewState.paper-size = 0; PrintPreviewState.settings-changed(); }
+                                        }
+                                        letter-btn := SetupChoiceButton {
+                                            label: "US Letter";
+                                            a11y: "Paper Size US Letter";
+                                            active: PrintPreviewState.paper-size == 1;
+                                            clicked => { PrintPreviewState.paper-size = 1; PrintPreviewState.settings-changed(); }
+                                        }
                                     }
                                 }
 
-                                SetupOptionLabel { text: "Orientation"; }
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.sm;
-                                    portrait-btn := SetupChoiceButton {
-                                        label: "Portrait";
-                                        a11y: "Orientation Portrait";
-                                        active: PrintPreviewState.orientation == 0;
-                                        clicked => { PrintPreviewState.orientation = 0; PrintPreviewState.settings-changed(); }
-                                    }
-                                    landscape-btn := SetupChoiceButton {
-                                        label: "Landscape";
-                                        a11y: "Orientation Landscape";
-                                        active: PrintPreviewState.orientation == 1;
-                                        clicked => { PrintPreviewState.orientation = 1; PrintPreviewState.settings-changed(); }
-                                    }
-                                }
-
-                                SetupOptionLabel { text: "Margins"; }
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.sm;
-                                    normal-btn := SetupChoiceButton {
-                                        label: "Normal";
-                                        a11y: "Margins Normal";
-                                        active: PrintPreviewState.margin-preset == 0;
-                                        clicked => { PrintPreviewState.margin-preset = 0; PrintPreviewState.settings-changed(); }
-                                    }
-                                    narrow-btn := SetupChoiceButton {
-                                        label: "Narrow";
-                                        a11y: "Margins Narrow";
-                                        active: PrintPreviewState.margin-preset == 1;
-                                        clicked => { PrintPreviewState.margin-preset = 1; PrintPreviewState.settings-changed(); }
-                                    }
-                                    wide-btn := SetupChoiceButton {
-                                        label: "Wide";
-                                        a11y: "Margins Wide";
-                                        active: PrintPreviewState.margin-preset == 2;
-                                        clicked => { PrintPreviewState.margin-preset = 2; PrintPreviewState.settings-changed(); }
+                                VerticalLayout {
+                                    spacing: Theme.tokens.space.xs;
+                                    SetupOptionLabel { text: "Orientation"; }
+                                    HorizontalLayout {
+                                        spacing: Theme.tokens.space.sm;
+                                        portrait-btn := SetupChoiceButton {
+                                            label: "Portrait";
+                                            a11y: "Orientation Portrait";
+                                            active: PrintPreviewState.orientation == 0;
+                                            clicked => { PrintPreviewState.orientation = 0; PrintPreviewState.settings-changed(); }
+                                        }
+                                        landscape-btn := SetupChoiceButton {
+                                            label: "Landscape";
+                                            a11y: "Orientation Landscape";
+                                            active: PrintPreviewState.orientation == 1;
+                                            clicked => { PrintPreviewState.orientation = 1; PrintPreviewState.settings-changed(); }
+                                        }
                                     }
                                 }
 
-                                SetupOptionLabel { text: "Revision View"; }
-                                HorizontalLayout {
-                                    spacing: Theme.tokens.space.sm;
-                                    final-btn := SetupChoiceButton {
-                                        label: "Final";
-                                        a11y: "Revision View Final";
-                                        active: PrintPreviewState.revision-view == 0;
-                                        clicked => { PrintPreviewState.revision-view = 0; PrintPreviewState.settings-changed(); }
+                                VerticalLayout {
+                                    spacing: Theme.tokens.space.xs;
+                                    SetupOptionLabel { text: "Margins"; }
+                                    HorizontalLayout {
+                                        spacing: Theme.tokens.space.sm;
+                                        normal-btn := SetupChoiceButton {
+                                            label: "Normal";
+                                            a11y: "Margins Normal";
+                                            active: PrintPreviewState.margin-preset == 0;
+                                            clicked => { PrintPreviewState.margin-preset = 0; PrintPreviewState.settings-changed(); }
+                                        }
+                                        narrow-btn := SetupChoiceButton {
+                                            label: "Narrow";
+                                            a11y: "Margins Narrow";
+                                            active: PrintPreviewState.margin-preset == 1;
+                                            clicked => { PrintPreviewState.margin-preset = 1; PrintPreviewState.settings-changed(); }
+                                        }
+                                        wide-btn := SetupChoiceButton {
+                                            label: "Wide";
+                                            a11y: "Margins Wide";
+                                            active: PrintPreviewState.margin-preset == 2;
+                                            clicked => { PrintPreviewState.margin-preset = 2; PrintPreviewState.settings-changed(); }
+                                        }
                                     }
-                                    markup-btn := SetupChoiceButton {
-                                        label: "With Markup";
-                                        a11y: "Revision View With Markup";
-                                        active: PrintPreviewState.revision-view == 1;
-                                        clicked => { PrintPreviewState.revision-view = 1; PrintPreviewState.settings-changed(); }
+                                }
+
+                                VerticalLayout {
+                                    spacing: Theme.tokens.space.xs;
+                                    SetupOptionLabel { text: "Revision View"; }
+                                    HorizontalLayout {
+                                        spacing: Theme.tokens.space.sm;
+                                        final-btn := SetupChoiceButton {
+                                            label: "Final";
+                                            a11y: "Revision View Final";
+                                            active: PrintPreviewState.revision-view == 0;
+                                            clicked => { PrintPreviewState.revision-view = 0; PrintPreviewState.settings-changed(); }
+                                        }
+                                        markup-btn := SetupChoiceButton {
+                                            label: "With Markup";
+                                            a11y: "Revision View With Markup";
+                                            active: PrintPreviewState.revision-view == 1;
+                                            clicked => { PrintPreviewState.revision-view = 1; PrintPreviewState.settings-changed(); }
+                                        }
                                     }
                                 }
 

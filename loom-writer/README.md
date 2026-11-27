@@ -2,13 +2,32 @@
 
 Loom Writer is a local-first word processor. Documents are open, inspectable `.loomdoc` packages on your own computer; nothing is uploaded and no account is needed. It exports PDF, Word `.docx` and Markdown.
 
-**Platforms:** Windows x86-64 and Linux x86-64. macOS is out of scope for v1 and is not claimed.
+**Platforms verified (2026-11-24):** macOS (`aarch64-apple-darwin`), Windows (`x86_64-pc-windows-msvc`), and Linux (`x86_64-unknown-linux-gnu`).
 
-**Status: `ACCEPTANCE_BLOCKED`.** The 2026-10-18 acceptance record was retracted by the supervisor (unverified evidence, no shown independent review); this is not a production-ready claim. The live ledger is the current-truth section of the repository `AGENTS.md`; this README lists what has evidence behind it and what does not.
+**Status: `ACCEPTANCE_BLOCKED` (within `office-v1`; suite gate stays `ACCEPTANCE_BLOCKED` pending Gate 2 human visual sign-off).** The live gate and application quality table live in [docs/workflow/current.md](../docs/workflow/current.md), and the 2026-11-24 verification ledger lives in [docs/audits/uiux-2026-10-27.md](../docs/audits/uiux-2026-10-27.md#pr-28-audit-remediation--macos-visualfunctional-parity-audit--2026-11-24).
 
 Evidence tags used below:
 
-- **[tests]** covered by automated tests. The 2026-10-19 Windows workspace run passed 569 tests with four ignored; the ledger records the exact command and scope.
+- **[tests]** covered by automated tests. On 2026-11-24, `cargo test --manifest-path loom-writer/Cargo.toml --workspace --locked` passed across 11 suites (`1,368 passed; 0 failed; 5 ignored`).
+
+## Visual feature tour
+
+| Feature | Preview |
+|---|---|
+| **Start Hub & Recents** | ![Loom Writer Start Hub](docs/screenshots/start-hub.png) |
+| **Template Chooser** (Blank, Executive Report, Business Letter, CV, Newsletter) | ![Loom Writer Template Chooser](docs/screenshots/template-chooser.png) |
+| **Interactive Welcome Guide** | ![Loom Writer Welcome Guide](docs/screenshots/welcome-guide.png) |
+| **Typography, Font Picker & Format Inspector** | ![Loom Writer Typography and Font Picker](docs/screenshots/typography-and-font-picker.png) |
+| **Bulleted & Numbered Lists** (disc/circle/square/dash & `1.`/`a.`/`A.`/`i.`/`I.`) | ![Loom Writer Lists and Styles](docs/screenshots/lists-and-styles.png) |
+| **Tables & Table Inspector** | ![Loom Writer Tables and Inspector](docs/screenshots/tables-and-inspector.png) |
+| **Outline Navigator & Page Setup** | ![Loom Writer Outline and Page Setup](docs/screenshots/outline-and-page-setup.png) |
+| **Headers, Footers & Footnotes** | ![Loom Writer Headers Footers Footnotes](docs/screenshots/headers-footers-footnotes.png) |
+| **Comments & Tracked Changes** | ![Loom Writer Comments and Track Changes](docs/screenshots/comments-and-track-changes.png) |
+| **Find & Replace** | ![Loom Writer Find and Replace](docs/screenshots/find-and-replace.png) |
+| **Word Count & Reading Time** | ![Loom Writer Word Count](docs/screenshots/word-count.png) |
+| **Command Palette (`Cmd+K`)** | ![Loom Writer Command Palette](docs/screenshots/command-palette.png) |
+| **Print Preview** | ![Loom Writer Print Preview](docs/screenshots/print-preview.png) |
+| **High-Contrast Appearance** | ![Loom Writer High Contrast](docs/screenshots/theme-high-contrast.png) |
 - **[live-W]** exercised by hand in a real Windows 11 window.
 - **[live-L]** exercised by hand in a real Linux window (WSLg, Ubuntu).
 

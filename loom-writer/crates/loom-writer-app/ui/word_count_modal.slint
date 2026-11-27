@@ -297,13 +297,13 @@ export component WordCountModal inherits Rectangle {
                 }
 
                 footer-row := Rectangle {
-                    height: close-btn.preferred-height;
+                    height: max(Theme.scaled-control-height, close-btn.preferred-height);
 
                     close-btn := LoomButton {
                         x: Theme.rtl ? 0px : parent.width - self.width;
                         y: 0px;
                         width: self.preferred-width;
-                        height: self.preferred-height;
+                        height: max(Theme.scaled-control-height, self.preferred-height);
                         label: "Close";
                         variant: "primary";
                         accessible-name: "Close Word Count";

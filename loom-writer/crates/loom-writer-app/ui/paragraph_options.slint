@@ -1,0 +1,158 @@
+import { Theme } from "theme.slint";
+import { LoomButton } from "foundation.slint";
+import { WriterFormatState } from "alignment_state.slint";
+
+export component ParagraphOptionsSection inherits VerticalLayout {
+    spacing: Theme.tokens.space.sm;
+    VerticalLayout {
+                padding-left: Theme.tokens.space.lg;
+                padding-right: Theme.tokens.space.lg;
+                Text {
+                    text: "Paragraph Direction";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    accessible-role: radio-group;
+                    accessible-label: "Paragraph Direction";
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Automatic";
+                            variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 0;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
+                            clicked => { WriterFormatState.select-direction(0); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Left to Right";
+                            variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 1;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
+                            clicked => { WriterFormatState.select-direction(1); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Right to Left";
+                            variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 2;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 2;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
+                            clicked => { WriterFormatState.select-direction(2); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Right to Left";
+                            variant: WriterFormatState.paragraph-direction == 2 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 2;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 2;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Right-to-left paragraph direction";
+                            clicked => { WriterFormatState.select-direction(2); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Left to Right";
+                            variant: WriterFormatState.paragraph-direction == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 1;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Left-to-right paragraph direction";
+                            clicked => { WriterFormatState.select-direction(1); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs * 2) / 3;
+                            label: "Automatic";
+                            variant: WriterFormatState.paragraph-direction == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.paragraph-direction == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.paragraph-direction == 0;
+                            accessible-description: WriterFormatState.paragraph-direction == -1 ? "Mixed paragraph direction" : "Automatic paragraph direction";
+                            clicked => { WriterFormatState.select-direction(0); }
+                        }
+                    }
+                }
+            }
+
+            VerticalLayout {
+                padding-left: Theme.tokens.space.lg;
+                padding-right: Theme.tokens.space.lg;
+                Text {
+                    text: "Logical Alignment";
+                    font-size: Theme.type.body;
+                    color: Theme.palette().ink;
+                }
+                Rectangle {
+                    height: Theme.scaled-control-height;
+                    accessible-role: radio-group;
+                    accessible-label: "Logical Alignment";
+                    if !Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "Start";
+                            variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 0;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
+                            clicked => { WriterFormatState.select-logical-alignment(0); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "End";
+                            variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 1;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
+                            clicked => { WriterFormatState.select-logical-alignment(1); }
+                        }
+                    }
+                    if Theme.rtl : HorizontalLayout {
+                        spacing: Theme.tokens.space.xs;
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "End";
+                            variant: WriterFormatState.logical-alignment == 1 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 1;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 1;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph end";
+                            clicked => { WriterFormatState.select-logical-alignment(1); }
+                        }
+                        LoomButton {
+                            width: (parent.width - Theme.tokens.space.xs) / 2;
+                            label: "Start";
+                            variant: WriterFormatState.logical-alignment == 0 ? "secondary" : "ghost";
+                            selected: WriterFormatState.logical-alignment == 0;
+                            enabled: WriterFormatState.paragraph-formatting-available;
+                            accessible-checkable: true;
+                            accessible-checked: WriterFormatState.logical-alignment == 0;
+                            accessible-description: WriterFormatState.logical-alignment == -1 ? "No uniform logical alignment" : "Align to paragraph start";
+                            clicked => { WriterFormatState.select-logical-alignment(0); }
+                        }
+                    }
+                }
+            }
+}

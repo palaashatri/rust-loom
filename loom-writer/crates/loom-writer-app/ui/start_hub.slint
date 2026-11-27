@@ -319,7 +319,7 @@ export component StartHubModal inherits Rectangle {
                     if modal-card.height >= 420px : Rectangle { height: 1px; background: Theme.palette().border; }
                     if modal-card.height >= 420px : VerticalLayout {
                         padding-top: Theme.tokens.space.sm; spacing: Theme.tokens.space.xs;
-                        for hint in ["\u{2191} \u{2193}  Select document", "\u{21B5}  Open selected", "Esc  Close hub"] : Text {
+                        for hint in ["\u{2191} \u{2193}  Select document", "Return  Open selected", "Esc  Close hub"] : Text {
                             text: hint; font-size: Theme.type.caption; color: Theme.palette().ink-secondary;
                             horizontal-alignment: Theme.rtl ? right : left; overflow: elide;
                         }
