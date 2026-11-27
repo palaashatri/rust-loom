@@ -2251,20 +2251,21 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
         let state = state.clone();
         let app_ref = app.as_weak();
         app.on_select_slide(move |index| {
-            if let Some(app) = app_ref.upgrade() {
-                if index >= 0 {
-                    {
-                        // Release the mutable borrow before `refresh` reads the session.
-                        let mut session = state.session.borrow_mut();
-                        session.end_table_text_edit();
-                        if session.document.select_slide(index as usize) {
-                            session.clear_selection();
-                        }
-                    }
-                    state.selected_element.set(0);
-                    refresh(&app, &state);
+            let (Some(app), Ok(idx)) = (app_ref.upgrade(), usize::try_from(index)) else {
+                return;
+            };
+            {
+                let mut s = state.session.borrow_mut();
+                if idx >= s.document.slides.len() {
+                    return;
+                }
+                s.end_table_text_edit();
+                if s.document.select_slide(idx) {
+                    s.clear_selection();
                 }
             }
+            state.selected_element.set(0);
+            refresh(&app, &state);
         });
     }
     {
