@@ -418,7 +418,9 @@ jobs:
 
           api_root="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
           release_json="$RUNNER_TEMP/loom-release.json"
+          releases_list_json="$RUNNER_TEMP/loom-releases-list.json"
           ref_json="$RUNNER_TEMP/loom-tag-ref.json"
+          release_id=""
           scratch_root="$(mktemp -d "$RUNNER_TEMP/loom-release-publish.XXXXXX")"
           trap 'rm -rf -- "$scratch_root"' EXIT
 
@@ -446,19 +448,112 @@ jobs:
             jq -e --arg name "$1" 'any(.assets[]; .name == $name)' "$release_json" >/dev/null
           }
 
+          lookup_release_by_tag() {
+            local tag="$1"
+            local encoded status
+            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
+            if ! status="$(api_request GET "${api_root}/releases/tags/${encoded}" "$release_json")"; then
+              echo "Could not inspect release ${tag}." >&2
+              return 2
+            fi
+            case "$status" in
+              200)
+                jq -e --arg tag "$tag" '(.id | type == "number") and (.assets | type == "array") and (.tag_name == $tag)' "$release_json" >/dev/null || return 2
+                release_id="$(jq -r '.id' "$release_json")"
+                return 0
+                ;;
+              404)
+                if ! status="$(api_request GET "${api_root}/releases?per_page=100" "$releases_list_json")"; then
+                  echo "Could not list releases while looking up ${tag}." >&2
+                  return 2
+                fi
+                if [ "$status" != "200" ]; then
+                  echo "Could not list releases while looking up ${tag} (HTTP ${status})." >&2
+                  cat "$releases_list_json" >&2
+                  return 2
+                fi
+                if jq -e --arg tag "$tag" 'any(.[]; .tag_name == $tag)' "$releases_list_json" >/dev/null; then
+                  jq --arg tag "$tag" '[.[] | select(.tag_name == $tag)] | sort_by([(.draft | if . then 1 else 0 end), -(.assets | length), -.id]) | .[0]' "$releases_list_json" > "$release_json"
+                  release_id="$(jq -r '.id' "$release_json")"
+                  return 0
+                fi
+                release_id=""
+                return 1
+                ;;
+              *)
+                echo "Could not inspect release ${tag} (HTTP ${status})." >&2
+                cat "$release_json" >&2
+                return 2
+                ;;
+            esac
+          }
+
           refresh_release() {
             local tag="$1"
             local status
-            if ! status="$(api_request GET "${api_root}/releases/tags/$(jq -rn --arg tag "$tag" '$tag | @uri')" "$release_json")"; then
-              echo "Could not inspect release ${tag}." >&2
+            if [ -z "$release_id" ]; then
+              lookup_release_by_tag "$tag"
+              return $?
+            fi
+            if ! status="$(api_request GET "${api_root}/releases/${release_id}" "$release_json")"; then
+              echo "Could not inspect release ${tag} (id ${release_id})." >&2
               return 1
             fi
             if [ "$status" != "200" ]; then
-              echo "Could not inspect release ${tag} (HTTP ${status})." >&2
+              echo "Could not inspect release ${tag} (id ${release_id}, HTTP ${status})." >&2
               cat "$release_json" >&2
               return 1
             fi
-            jq -e '(.id | type == "number") and (.assets | type == "array") and (.tag_name | type == "string")' "$release_json" >/dev/null
+            jq -e --arg id "$release_id" '(.id == ($id | tonumber)) and (.assets | type == "array") and (.tag_name | type == "string")' "$release_json" >/dev/null
+          }
+
+          patch_release() {
+            local payload="$1"
+            local status
+            [ -n "$release_id" ] || { echo "patch_release called without release_id" >&2; return 1; }
+            if ! status="$(api_request PATCH "${api_root}/releases/${release_id}" "$release_json" "$payload")"; then
+              echo "Could not update release ${release_id}." >&2
+              return 1
+            fi
+            if [ "$status" != "200" ]; then
+              echo "Could not update release ${release_id} (HTTP ${status})." >&2
+              cat "$release_json" >&2
+              return 1
+            fi
+            jq -e --arg id "$release_id" '(.id == ($id | tonumber)) and (.assets | type == "array")' "$release_json" >/dev/null
+          }
+
+          upload_asset() {
+            local file="$1"
+            local name="${file##*/}"
+            local upload_base encoded_name
+            upload_base="$(jq -r '.upload_url' "$release_json" | sed 's/{.*$//')"
+            [ -n "$upload_base" ] && [ "$upload_base" != "null" ] || { echo "Missing upload_url for release ${release_id}." >&2; return 1; }
+            encoded_name="$(jq -rn --arg name "$name" '$name | @uri')"
+            curl --silent --show-error --fail-with-body \
+              --output "$scratch_root/upload-resp.json" \
+              --request POST \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Content-Type: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --data-binary @"$file" \
+              "${upload_base}?name=${encoded_name}"
+          }
+
+          delete_asset() {
+            local name="$1"
+            local asset_id status
+            asset_id="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id' "$release_json" | head -n 1)"
+            [ -n "$asset_id" ] && [ "$asset_id" != "null" ] || { echo "Missing asset_id for ${name}." >&2; return 1; }
+            if ! status="$(api_request DELETE "${api_root}/releases/assets/${asset_id}" "$scratch_root/delete-resp.json")"; then
+              echo "Could not delete asset ${name} (${asset_id})." >&2
+              return 1
+            fi
+            [ "$status" = "204" ] || {
+              echo "Could not delete asset ${name} (${asset_id}, HTTP ${status})." >&2
+              cat "$scratch_root/delete-resp.json" >&2
+              return 1
+            }
           }
 
           resolve_ref_commit() {
@@ -588,7 +683,15 @@ jobs:
             local tag="$1"
             local name="$2"
             local destination="$3"
-            gh release download "$tag" --dir "$destination" --pattern "$name"
+            local asset_id
+            asset_id="$(jq -r --arg name "$name" '.assets[] | select(.name == $name) | .id' "$release_json" | head -n 1)"
+            [ -n "$asset_id" ] && [ "$asset_id" != "null" ] || { echo "could not find asset_id for ${name} on ${tag}" >&2; return 1; }
+            curl --silent --show-error --fail --location --retry 3 \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --output "$destination/$name" \
+              "${api_root}/releases/assets/${asset_id}"
             [ -f "$destination/$name" ] || { echo "could not download release asset ${name}" >&2; return 1; }
           }
 
@@ -611,7 +714,7 @@ jobs:
             mkdir -p "$remote_dir" "$candidate_dir" "$verify_dir"
             printf '%s\n' "$source_sha" > "$marker_source"
 
-            [ "${#archives[@]}" -eq 4 ] || { echo "expected four platform archives, found ${#archives[@]}" >&2; return 1; }
+            [ "${#archives[@]}" -eq 6 ] || { echo "expected six platform archives, found ${#archives[@]}" >&2; return 1; }
             asset_names_before_mutation="$(jq -r '.assets[].name' "$release_json" | LC_ALL=C sort)"
             for archive in "${archives[@]}"; do
               [ -f "$archive" ] || { echo "missing archive ${archive}" >&2; return 1; }
@@ -690,13 +793,15 @@ jobs:
 
             # Existing release assets are never replaced.
             if [ "$marker_missing" = true ]; then
-              gh release upload "$tag" "$marker_source"
+              upload_asset "$marker_source"
             fi
             if ((${#missing_archives[@]} > 0)); then
-              gh release upload "$tag" "${missing_archives[@]}"
+              for archive in "${missing_archives[@]}"; do
+                upload_asset "$archive"
+              done
             fi
             if [ "$checksum_exists" = false ]; then
-              gh release upload "$tag" "$candidate_dir/$checksum_name"
+              upload_asset "$candidate_dir/$checksum_name"
             fi
 
             refresh_release "$tag"
@@ -720,7 +825,8 @@ jobs:
             local target_sha="$2"
             local title="$3"
             local notes="$4"
-            local encoded status ref_status
+            local prerelease="${5:-false}"
+            local encoded status ref_status payload
             encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
             if ! ref_status="$(api_request GET "${api_root}/git/ref/tags/${encoded}" "$ref_json")"; then
               echo "Could not inspect tag ${tag} before creating its draft release." >&2
@@ -729,10 +835,10 @@ jobs:
             case "$ref_status" in
               200)
                 jq -e --arg ref "refs/tags/${tag}" '.ref == $ref' "$ref_json" >/dev/null
-                gh release create "$tag" --draft --verify-tag --title "$title" --notes "$notes"
+                payload="$(jq -cn --arg tag "$tag" --arg name "$title" --arg body "$notes" --argjson pre "$prerelease" '{tag_name:$tag, name:$name, body:$body, draft:true, prerelease:$pre}')"
                 ;;
               404)
-                gh release create "$tag" --draft --target "$target_sha" --title "$title" --notes "$notes"
+                payload="$(jq -cn --arg tag "$tag" --arg target "$target_sha" --arg name "$title" --arg body "$notes" --argjson pre "$prerelease" '{tag_name:$tag, target_commitish:$target, name:$name, body:$body, draft:true, prerelease:$pre}')"
                 ;;
               *)
                 echo "Could not inspect tag ${tag} (HTTP ${ref_status}); refusing to create a release." >&2
@@ -740,29 +846,35 @@ jobs:
                 return 1
                 ;;
             esac
+            if ! status="$(api_request POST "${api_root}/releases" "$release_json" "$payload")"; then
+              echo "Could not create draft release ${tag}." >&2
+              return 1
+            fi
+            if [ "$status" != "201" ]; then
+              echo "Could not create draft release ${tag} (HTTP ${status})." >&2
+              cat "$release_json" >&2
+              return 1
+            fi
+            release_id="$(jq -r '.id' "$release_json")"
             refresh_release "$tag"
           }
 
           publish_version_tag() {
             local tag="$1"
-            local encoded status is_draft
+            local status is_draft
             local -a archives=(assets/loom-*)
             verify_tag_commit "$tag" "$GITHUB_SHA"
-            encoded="$(jq -rn --arg tag "$tag" '$tag | @uri')"
-            if ! status="$(api_request GET "${api_root}/releases/tags/${encoded}" "$release_json")"; then
-              echo "Could not inspect release ${tag}." >&2
-              return 1
+            if lookup_release_by_tag "$tag"; then
+              status=0
+            else
+              status=$?
             fi
             case "$status" in
-              200)
-                jq -e --arg tag "$tag" '(.id | type == "number") and (.assets | type == "array") and (.tag_name == $tag)' "$release_json" >/dev/null
-                ;;
-              404)
-                create_draft_release "$tag" "$GITHUB_SHA" "Loom ${tag}" "Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. See README.txt inside each archive."
+              0) ;;
+              1)
+                create_draft_release "$tag" "$GITHUB_SHA" "Loom ${tag}" "Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. See README.txt inside each archive." false
                 ;;
               *)
-                echo "Could not inspect release ${tag} (HTTP ${status}); refusing to publish." >&2
-                cat "$release_json" >&2
                 return 1
                 ;;
             esac
@@ -770,7 +882,7 @@ jobs:
             verify_tag_commit "$tag" "$GITHUB_SHA"
             is_draft="$(jq -r '.draft // false' "$release_json")"
             if [ "$is_draft" = "true" ]; then
-              gh release edit "$tag" --draft=false
+              patch_release '{"draft":false}'
             fi
             refresh_release "$tag"
             [ "$(jq -r '.draft // false' "$release_json")" = "false" ] || { echo "Release ${tag} is complete but remains a draft." >&2; return 1; }
@@ -783,7 +895,7 @@ jobs:
           redraft_release_after_tag_mismatch() {
             local tag="$1"
             echo "Tag ${tag} changed after release publication; attempting to hide the release again." >&2
-            if ! gh release edit "$tag" --draft; then
+            if ! patch_release '{"draft":true}'; then
               echo "Could not request draft state for release ${tag}; checking its observed state." >&2
             fi
             if ! refresh_release "$tag"; then
@@ -849,24 +961,21 @@ jobs:
             local title="Loom nightly (${GITHUB_SHA::7})"
             local notes="Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. Unzip and run; see README.txt inside each archive."
 
-            [ "${#archives[@]}" -eq 4 ] || { echo "expected four current nightly archives, found ${#archives[@]}" >&2; return 1; }
+            [ "${#archives[@]}" -eq 6 ] || { echo "expected six current nightly archives, found ${#archives[@]}" >&2; return 1; }
             # A queued publisher may start after a newer push; reject an older
             # or divergent candidate before it mutates the rolling release.
             check_nightly_candidate_order "$tag" "$source_sha"
-            if ! release_status="$(api_request GET "${api_root}/releases/tags/${tag}" "$release_json")"; then
-              echo "Could not inspect the nightly release." >&2
-              return 1
+            if lookup_release_by_tag "$tag"; then
+              release_status=0
+            else
+              release_status=$?
             fi
             case "$release_status" in
-              200)
-                jq -e '.tag_name == "nightly" and (.id | type == "number") and (.assets | type == "array")' "$release_json" >/dev/null
-                ;;
-              404)
-                create_draft_release "$tag" "$source_sha" "$title" "$notes"
+              0) ;;
+              1)
+                create_draft_release "$tag" "$source_sha" "$title" "$notes" true
                 ;;
               *)
-                echo "Could not inspect the nightly release (HTTP ${release_status}); refusing to publish." >&2
-                cat "$release_json" >&2
                 return 1
                 ;;
             esac
@@ -878,7 +987,7 @@ jobs:
             # candidate verifies, the ref moves, stale assets are pruned, and
             # the complete release is published again.
             if [ "$(jq -r '.draft // false' "$release_json")" = "false" ]; then
-              gh release edit "$tag" --draft
+              patch_release '{"draft":true}'
               refresh_release "$tag"
             fi
             [ "$(jq -r '.draft // false' "$release_json")" = "true" ] || { echo "Nightly release must be a draft before candidate assets are changed." >&2; return 1; }
@@ -896,7 +1005,7 @@ jobs:
                     if [ "$name" = "$current" ]; then keep=true; break; fi
                   done
                   if [ "$keep" = false ]; then
-                    gh release delete-asset "$tag" "$name" --yes
+                    delete_asset "$name"
                   fi
                   ;;
               esac
@@ -911,7 +1020,7 @@ jobs:
             # avoids clobbering a newer ref; the post-publish check below
             # attempts to hide a release if the unavoidable API race lands.
             verify_tag_commit "$tag" "$source_sha"
-            gh release edit "$tag" --title "$title" --notes "$notes" --prerelease --draft=false
+            patch_release "$(jq -cn --arg name "$title" --arg body "$notes" '{name:$name, body:$body, prerelease:true, draft:false}')"
             refresh_release "$tag"
             [ "$(jq -r '.draft // false' "$release_json")" = "false" ] || { echo "Nightly asset set is complete but the release remains a draft." >&2; return 1; }
             if ! verify_tag_commit "$tag" "$source_sha"; then
