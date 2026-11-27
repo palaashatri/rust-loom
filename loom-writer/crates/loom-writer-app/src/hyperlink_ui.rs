@@ -82,6 +82,10 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
                 g.set_hyperlink_open(false);
                 return;
             };
+            if range.start >= range.end {
+                g.set_hyperlink_error("Select text to link".into());
+                return;
+            }
             let tip = if tooltip.trim().is_empty() {
                 None
             } else {

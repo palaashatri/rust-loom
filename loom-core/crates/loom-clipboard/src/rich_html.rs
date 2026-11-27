@@ -3,6 +3,7 @@
 use loom_text::{CharacterStyle, FontWeight, StyleRun};
 
 /// Converts plain text + `StyleRun`s into minimal sanitized HTML (`<b>`, `<i>`, `<u>`, `<s>`).
+/// Overlapping runs are clamped to `cursor`; unsupported style attributes are omitted.
 pub fn runs_to_html(text: &str, runs: &[StyleRun]) -> String {
     if runs.is_empty() {
         return escape_html(text);
@@ -12,7 +13,7 @@ pub fn runs_to_html(text: &str, runs: &[StyleRun]) -> String {
     let mut sorted: Vec<&StyleRun> = runs.iter().collect();
     sorted.sort_by_key(|r| r.start);
     for run in sorted {
-        let start = run.start.min(text.len());
+        let start = run.start.max(cursor).min(text.len());
         let end = run.end.min(text.len());
         if end <= start {
             continue;

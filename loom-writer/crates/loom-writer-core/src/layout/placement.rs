@@ -163,7 +163,7 @@ impl Placer {
                     .and_then(|heights| heights.get(done + local))
                     .copied()
                     .unwrap_or(segment.line_height);
-                let (excl_x, _avail, push_below) = super::wrap_exclusion::compute_line_span(
+                let (_excl_x, _avail, push_below) = super::wrap_exclusion::compute_line_span(
                     &self.exclusions,
                     self.used,
                     height,
@@ -176,6 +176,12 @@ impl Placer {
                         pushed_y = y;
                     }
                 }
+                let (excl_x, _, _) = super::wrap_exclusion::compute_line_span(
+                    &self.exclusions,
+                    self.used,
+                    height,
+                    self.usable_width,
+                );
                 let x_off = excl_x;
                 self.lines.push(FlowLine {
                     block_index: segment.block_index,

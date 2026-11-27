@@ -330,7 +330,8 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         let app = app.as_weak();
         let slide_count = slide_count.clone();
         window.on_commit_jump(move || {
-            if let Some(target) = tools.borrow_mut().commit_jump(slide_count.get()) {
+            let target = tools.borrow_mut().commit_jump(slide_count.get());
+            if let Some(target) = target {
                 if let Some(a) = app.upgrade() {
                     a.invoke_select_slide(target as i32);
                 }

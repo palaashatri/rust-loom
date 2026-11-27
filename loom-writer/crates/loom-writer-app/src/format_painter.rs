@@ -83,7 +83,6 @@ fn capture_from_document(doc: &WriterDocument) -> CapturedWriterStyle {
                 .runs
                 .iter()
                 .find(|r| local >= r.start && local < r.end)
-                .or_else(|| block.runs.first())
                 .map(|r| r.style.clone())
                 .unwrap_or_default();
             return CapturedWriterStyle {

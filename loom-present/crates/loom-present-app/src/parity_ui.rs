@@ -185,6 +185,7 @@ pub(crate) fn toggle_list_style(app: &PresentApp, state: &Rc<GuiState>, style: L
                 let updated = format_list_paragraphs(&paras);
                 if updated != el.content {
                     el.content = updated;
+                    el.runs.clear();
                     changed = true;
                 }
             }
@@ -505,11 +506,11 @@ pub(crate) fn wire_p1_controls(app: &PresentApp, state: &Rc<GuiState>) {
             .on_sorter_select_slide(move |idx| {
                 if let Some(app) = app_ref.upgrade() {
                     if idx >= 0 {
-                        state
-                            .session
-                            .borrow_mut()
-                            .document
-                            .select_slide(idx as usize);
+                        let mut session = state.session.borrow_mut();
+                        if session.document.select_slide(idx as usize) {
+                            session.clear_selection();
+                        }
+                        drop(session);
                         state.selected_element.set(0);
                         refresh(&app, &state);
                     }

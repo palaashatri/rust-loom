@@ -449,20 +449,20 @@ export component PresentSlideCanvas inherits Rectangle {
             }
 
             if ElementInk.slide-footer-text != "" || ElementInk.show-slide-number : HorizontalLayout {
-                x: 24px;
-                y: parent.height - 26px;
-                width: max(1px, parent.width - 48px);
-                height: 20px;
+                x: 24 * parent.width / 1000;
+                y: parent.height - 26 * parent.height / 562.5;
+                width: max(1px, parent.width - 48 * parent.width / 1000);
+                height: 20 * parent.height / 562.5;
                 Text {
                     text: ElementInk.slide-footer-text;
-                    font-size: Theme.type.caption;
+                    font-size: max(6px, 11 * parent.height / 562.5);
                     color: DocumentInk.muted;
                     vertical-alignment: center;
                 }
                 Rectangle { horizontal-stretch: 1; }
             if ElementInk.show-slide-number : Text {
                 text: "" + root.slide-number;
-                font-size: Theme.type.caption;
+                font-size: max(6px, 11 * parent.height / 562.5);
                 color: DocumentInk.muted;
                 vertical-alignment: center;
             }
