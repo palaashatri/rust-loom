@@ -76,7 +76,10 @@ fn split_scheme(input: &str) -> Option<(&str, &str)> {
         return None;
     }
     let after_colon = &input[colon + 1..];
-    if after_colon
+    if !matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "mailto" | "tel"
+    ) && after_colon
         .bytes()
         .next()
         .is_some_and(|b| b.is_ascii_digit())
@@ -100,7 +103,10 @@ impl Hyperlink {
     /// Creates an email hyperlink, stripping any leading `mailto:` prefix.
     pub fn email(address: &str, tooltip: Option<String>) -> Result<Self, HyperlinkError> {
         let trimmed = address.trim();
-        let stripped = if trimmed.len() >= 7 && trimmed[..7].eq_ignore_ascii_case("mailto:") {
+        let stripped = if trimmed
+            .get(..7)
+            .is_some_and(|p| p.eq_ignore_ascii_case("mailto:"))
+        {
             &trimmed[7..]
         } else {
             trimmed

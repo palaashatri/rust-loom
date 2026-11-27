@@ -260,12 +260,15 @@ fn build(app: &PresentApp) -> Result<Presenter, String> {
         let w = window.as_weak();
         let app = app.as_weak();
         window.on_commit_jump(move || {
+            let was_empty = tools.borrow().jump_buffer.is_empty();
             if let Some(target) = tools.borrow_mut().commit_jump(usize::MAX) {
                 if let Some(a) = app.upgrade() {
                     a.invoke_select_slide(target as i32);
                 }
-            } else if let Some(a) = app.upgrade() {
-                a.invoke_next_slide();
+            } else if was_empty {
+                if let Some(a) = app.upgrade() {
+                    a.invoke_next_slide();
+                }
             }
             if let Some(win) = w.upgrade() {
                 win.set_jump_buffer("".into());
