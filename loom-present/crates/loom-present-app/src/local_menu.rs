@@ -55,6 +55,7 @@ pub(crate) const SUPPORTED_COMMANDS: &[&str] = &[
     "view.inspector",
     "view.navigator",
     "view.notes",
+    "view.slide_sorter",
     "view.preview",
     "view.presenter",
     "view.zoom_in",
@@ -124,6 +125,7 @@ pub(crate) fn build_present_menu_bar() -> loom_desktop::MenuBar {
         vec![
             loom_desktop::MenuItem::check("view.navigator", "Navigator", true),
             loom_desktop::MenuItem::check("view.notes", "Speaker Notes", false),
+            loom_desktop::MenuItem::check("view.slide_sorter", "Slide Sorter", false),
             loom_desktop::MenuItem::check("view.inspector", "Format Inspector", false),
         ]
         .into_iter()

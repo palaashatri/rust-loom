@@ -229,62 +229,132 @@ export component PresentInspector inherits LoomPanel {
                         }
                         if root.selection-count == 1 : HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
-                            for slot in 2 : VerticalLayout {
+                            for slot in 2 : HorizontalLayout {
                                 property <int> k: Theme.rtl ? 1 - slot : slot;
                                 horizontal-stretch: 1;
+                                spacing: Theme.tokens.space.xs;
+                                if !Theme.rtl : Text {
+                                    text: parent.k == 0 ? "X" : "Y";
+                                    font-size: Theme.type.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    width: 14px * max(1.0, Theme.text-scale);
+                                    accessible-role: none;
+                                    accessible-label: "";
+                                }
                                 if k == 0 : LoomTextField {
+                                    horizontal-stretch: 1;
                                     label: "X position";
                                     placeholder: "X";
-                                    field-min-width: 96px;
+                                    field-min-width: 72px;
                                     value <=> ElementInk.x-text;
                                     accepted(v) => { ElementInk.geometry-requested("x", v); }
                                     cancelled => { ElementInk.geometry-requested("x", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
                                 if k == 1 : LoomTextField {
+                                    horizontal-stretch: 1;
                                     label: "Y position";
                                     placeholder: "Y";
-                                    field-min-width: 96px;
+                                    field-min-width: 72px;
                                     value <=> ElementInk.y-text;
                                     accepted(v) => { ElementInk.geometry-requested("y", v); }
                                     cancelled => { ElementInk.geometry-requested("y", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
+                                if Theme.rtl : Text {
+                                    text: parent.k == 0 ? "X" : "Y";
+                                    font-size: Theme.type.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: left;
+                                    width: 14px * max(1.0, Theme.text-scale);
+                                    accessible-role: none;
+                                    accessible-label: "";
+                                }
                             }
                         }
                         if root.selection-count == 1 : HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
-                            for slot in 2 : VerticalLayout {
+                            for slot in 2 : HorizontalLayout {
                                 property <int> k: Theme.rtl ? 1 - slot : slot;
                                 horizontal-stretch: 1;
+                                spacing: Theme.tokens.space.xs;
+                                if !Theme.rtl : Text {
+                                    text: parent.k == 0 ? "W" : "H";
+                                    font-size: Theme.type.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: right;
+                                    width: 14px * max(1.0, Theme.text-scale);
+                                    accessible-role: none;
+                                    accessible-label: "";
+                                }
                                 if k == 0 : LoomTextField {
+                                    horizontal-stretch: 1;
                                     label: "Width";
                                     placeholder: "W";
-                                    field-min-width: 96px;
+                                    field-min-width: 72px;
                                     value <=> ElementInk.w-text;
                                     accepted(v) => { ElementInk.geometry-requested("w", v); }
                                     cancelled => { ElementInk.geometry-requested("w", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
                                 if k == 1 : LoomTextField {
+                                    horizontal-stretch: 1;
                                     label: "Height";
                                     placeholder: "H";
-                                    field-min-width: 96px;
+                                    field-min-width: 72px;
                                     value <=> ElementInk.h-text;
                                     accepted(v) => { ElementInk.geometry-requested("h", v); }
                                     cancelled => { ElementInk.geometry-requested("h", ""); }
                                     changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
                                 }
+                                if Theme.rtl : Text {
+                                    text: parent.k == 0 ? "W" : "H";
+                                    font-size: Theme.type.caption;
+                                    color: Theme.palette().ink-secondary;
+                                    vertical-alignment: center;
+                                    horizontal-alignment: left;
+                                    width: 14px * max(1.0, Theme.text-scale);
+                                    accessible-role: none;
+                                    accessible-label: "";
+                                }
                             }
                         }
-                        if root.selection-count == 1 : LoomTextField {
-                            label: "Rotation";
-                            placeholder: "0°";
-                            field-min-width: 96px;
-                            value <=> ElementInk.rot-text;
-                            accepted(v) => { ElementInk.geometry-requested("rot", v); }
-                            cancelled => { ElementInk.geometry-requested("rot", ""); }
-                            changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                        if root.selection-count == 1 : HorizontalLayout {
+                            spacing: Theme.tokens.space.xs;
+                            if !Theme.rtl : Text {
+                                text: "Rot";
+                                font-size: Theme.type.caption;
+                                color: Theme.palette().ink-secondary;
+                                vertical-alignment: center;
+                                horizontal-alignment: right;
+                                width: 24px * max(1.0, Theme.text-scale);
+                                accessible-role: none;
+                                accessible-label: "";
+                            }
+                            LoomTextField {
+                                horizontal-stretch: 1;
+                                label: "Rotation";
+                                placeholder: "0°";
+                                field-min-width: 96px;
+                                value <=> ElementInk.rot-text;
+                                accepted(v) => { ElementInk.geometry-requested("rot", v); }
+                                cancelled => { ElementInk.geometry-requested("rot", ""); }
+                                changed focused => { if (self.focused) { root.reveal(self.absolute-position.y, self.height); } }
+                            }
+                            if Theme.rtl : Text {
+                                text: "Rot";
+                                font-size: Theme.type.caption;
+                                color: Theme.palette().ink-secondary;
+                                vertical-alignment: center;
+                                horizontal-alignment: left;
+                                width: 24px * max(1.0, Theme.text-scale);
+                                accessible-role: none;
+                                accessible-label: "";
+                            }
                         }
                         if root.selection-count == 0 : PresentLayoutPicker { }
                     }
@@ -342,7 +412,7 @@ export component PresentInspector inherits LoomPanel {
                             cycle-trigger => { ElementInk.cycle-build-trigger(); }
                         }
                         new-presentation-template := LoomButton {
-                            icon: "format";
+                            icon: "document";
                             label: "New from Template...";
                             variant: "secondary";
                             clicked => { root.open-theme-chooser(); }

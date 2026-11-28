@@ -337,6 +337,7 @@ pub(crate) fn is_present_menu_command(id: &str) -> bool {
                 | "view.inspector"
                 | "view.navigator"
                 | "view.notes"
+                | "view.slide_sorter"
                 | "view.preview"
                 | "view.presenter"
                 | "view.zoom_in"

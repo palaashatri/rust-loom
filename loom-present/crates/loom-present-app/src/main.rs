@@ -1867,15 +1867,24 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     app.show().map_err(|error| error.to_string())?;
     #[cfg(target_os = "macos")]
     {
+        let app_icon = include_bytes!(
+            "../../../../loom-core/crates/loom-ui/ui/app-icons/loom-present.512.png"
+        );
+        loom_desktop::macos_window::set_app_icon(app_icon);
         // The native window handle is available only after the event loop has
-        // created the window; apply the titlebar appearance then.
+        // created the window; apply the titlebar appearance, edited dot, and
+        // represented file path then.
         let weak = app.as_weak();
+        let initial_dirty = deck_is_dirty(&state);
+        let initial_path = state.save_path.borrow().clone();
         slint::invoke_from_event_loop(move || {
+            loom_desktop::macos_window::set_app_icon(app_icon);
             if let Some(app) = weak.upgrade() {
                 loom_desktop::macos_window::apply(
                     &app.window().window_handle(),
                     app.global::<crate::Theme>().get_active_theme().as_str(),
                 );
+                file_title::sync_macos_window(&app, initial_dirty, initial_path.as_deref());
             }
         })
         .ok();

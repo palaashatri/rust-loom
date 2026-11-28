@@ -226,24 +226,17 @@ export component WelcomeGuideModal inherits Rectangle {
                     height: 60px;
                     background: Theme.palette().chrome;
 
-                    Rectangle {
-                        x: Theme.rtl ? parent.width - 28px - Theme.tokens.space.xl : Theme.tokens.space.xl;
+                    Image {
+                        x: Theme.rtl ? parent.width - 36px - Theme.tokens.space.xl : Theme.tokens.space.xl;
                         y: (parent.height - self.height) / 2;
-                        width: 28px;
-                        height: 28px;
-                        border-radius: 6px;
-                        background: Theme.palette().accent;
-                        Icon {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            icon: "present";
-                            tint: Theme.palette().accent-ink;
-                            size: 16px;
-                        }
+                        width: 36px;
+                        height: 36px;
+                        source: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-present.512.png");
+                        image-fit: contain;
                     }
 
                     Text {
-                        property <length> lead-x: Theme.tokens.space.xl + 28px + Theme.tokens.space.md;
+                        property <length> lead-x: Theme.tokens.space.xl + 36px + Theme.tokens.space.md;
                         x: Theme.rtl ? Theme.tokens.space.xl + 40px : self.lead-x;
                         y: (parent.height - self.height) / 2;
                         width: max(80px, parent.width - self.lead-x - Theme.tokens.space.xl - 40px);
