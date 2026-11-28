@@ -1,4 +1,4 @@
-import { LoomIconButton, LoomButton } from "foundation.slint";
+import { Icon } from "icons.slint";
 import { Theme } from "theme.slint";
 import { Doc } from "doc_palette.slint";
 
@@ -21,27 +21,109 @@ export component SheetChartHeader inherits HorizontalLayout {
         overflow: elide;
     }
 
-    Rectangle {
-        background: Theme.active-theme == "light" ? transparent : Theme.palette().surface-raised;
+    // Chart header controls sit on the paper chart card, so they stay on the
+    // paper-surface palette across Light, Dark, and High Contrast themes.
+    header-actions := Rectangle {
+        background: Theme.palette().paper;
         border-radius: Theme.tokens.metrics.radius-small;
-        border-width: Theme.active-theme == "light" ? 0px : 1px;
-        border-color: Theme.active-theme == "light" ? transparent : Theme.palette().border;
+        border-width: 1px;
+        border-color: Theme.palette().paper-line;
+
         HorizontalLayout {
-            padding: Theme.active-theme == "light" ? 0px : 2px;
+            padding: 2px;
             spacing: 2px;
-            LoomButton {
-                variant: "ghost";
-                label: root.kind-label;
-                clicked => {
-                    root.cycle-kind();
+            cross-axis-alignment: center;
+
+            kind-button := Rectangle {
+                min-height: Theme.tokens.metrics.compact-control-height * max(1.0, root.text-scale);
+                min-width: max(
+                    Theme.tokens.metrics.control-height * max(1.0, root.text-scale),
+                    kind-text.preferred-width + Theme.tokens.space.lg * 2
+                );
+                border-radius: Theme.tokens.metrics.radius-small;
+                border-width: kind-focus.has-focus ? 2px : 0px;
+                border-color: Doc.ring;
+                background: kind-touch.pressed ? Theme.palette().paper-line
+                    : kind-touch.has-hover ? Doc.well
+                    : Theme.palette().paper;
+                accessible-role: button;
+                accessible-label: root.kind-label;
+                accessible-description: "Switch chart type from " + root.kind-label;
+                accessible-action-default => { root.cycle-kind(); }
+
+                kind-text := Text {
+                    text: root.kind-label;
+                    font-size: Theme.tokens.typography.caption * max(1.0, root.text-scale);
+                    font-weight: 600;
+                    color: Theme.palette().paper-ink;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    accessible-role: none;
+                    accessible-label: "";
+                }
+
+                kind-focus := FocusScope {
+                    key-pressed(event) => {
+                        if (event.text == Key.Space || event.text == Key.Return) {
+                            root.cycle-kind();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                kind-touch := TouchArea {
+                    clicked => {
+                        kind-focus.focus();
+                        root.cycle-kind();
+                    }
                 }
             }
 
-            LoomIconButton {
-                icon: "close";
-                label: "Hide chart panel";
-                tooltip: "Hide the chart preview and keep the chart in the worksheet.";
-                clicked => { root.close-chart(); }
+            Rectangle {
+                width: 1px;
+                height: Theme.tokens.metrics.icon-size * max(1.0, root.text-scale);
+                background: Theme.palette().paper-line;
+            }
+
+            close-button := Rectangle {
+                width: Theme.tokens.metrics.compact-control-height * max(1.0, root.text-scale);
+                height: Theme.tokens.metrics.compact-control-height * max(1.0, root.text-scale);
+                border-radius: Theme.tokens.metrics.radius-small;
+                border-width: close-focus.has-focus ? 2px : 0px;
+                border-color: Doc.ring;
+                background: close-touch.pressed ? Theme.palette().paper-line
+                    : close-touch.has-hover ? Doc.well
+                    : Theme.palette().paper;
+                accessible-role: button;
+                accessible-label: "Hide chart panel";
+                accessible-description: "Hide the chart preview and keep the chart in the worksheet.";
+                accessible-action-default => { root.close-chart(); }
+
+                Icon {
+                    x: (parent.width - self.size) / 2;
+                    y: (parent.height - self.size) / 2;
+                    size: Theme.tokens.metrics.icon-small * max(1.0, root.text-scale);
+                    icon: "close";
+                    tint: Theme.palette().paper-ink;
+                }
+
+                close-focus := FocusScope {
+                    key-pressed(event) => {
+                        if (event.text == Key.Space || event.text == Key.Return) {
+                            root.close-chart();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                close-touch := TouchArea {
+                    clicked => {
+                        close-focus.focus();
+                        root.close-chart();
+                    }
+                }
             }
         }
     }

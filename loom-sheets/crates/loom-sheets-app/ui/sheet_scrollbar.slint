@@ -1,5 +1,5 @@
-// The compact scroll track shared by the worksheet and the Sheets inspector: a
-// sunken strip whose handle shows where the visible window sits.
+// Sleek macOS-style scrollbar shared by the worksheet and the Sheets inspector:
+// an ergonomic full-lane hit target with a subtle centered pill thumb.
 import { Theme } from "theme.slint";
 
 /// Compact scrollbar primitive. `value` is the scroll offset (zero or negative,
@@ -14,13 +14,20 @@ export component SheetScrollBar inherits Rectangle {
     // follows keyboard focus.
     in property <bool> focusable: true;
     in property <string> label: root.horizontal ? "Horizontal sheet scroll" : "Vertical sheet scroll";
+    private property <bool> active: scroll-track.pressed || scroll-track.has-hover;
+    private property <bool> hc: Theme.active-theme == "high-contrast";
+    private property <length> cross-inset: root.hc ? 0px : (root.active ? 0.5px : 1.5px);
+    private property <length> track-length: max(1px, (root.horizontal ? root.width : root.height) - 4px);
     property <length> handle-length: root.maximum > 0px
-        ? max(24px, (root.horizontal ? root.width : root.height) * root.page-size / (root.maximum + root.page-size))
-        : (root.horizontal ? root.width : root.height);
+        ? max(24px, root.track-length * root.page-size / (root.maximum + root.page-size))
+        : root.track-length;
 
     width: Theme.tokens.space.md;
     height: Theme.tokens.space.md;
-    background: Theme.palette().surface-sunken;
+    background: root.hc
+        ? Theme.palette().surface-sunken
+        : root.active ? Theme.palette().surface-sunken.with-alpha(0.35)
+        : transparent;
     accessible-role: slider;
     accessible-label: root.label;
     accessible-value: root.maximum > 0px ? -root.value / 1px : 0.0;
@@ -45,33 +52,36 @@ export component SheetScrollBar inherits Rectangle {
         }
     }
 
-    Rectangle {
-        x: root.horizontal && root.maximum > 0px
-            ? clamp((-root.value / root.maximum) * (parent.width - self.width), 0px, parent.width - self.width)
-            : 0px;
-        y: root.horizontal ? 0px
-            : root.maximum > 0px
-                ? clamp((-root.value / root.maximum) * (parent.height - self.height), 0px, parent.height - self.height)
-                : 0px;
-        width: root.horizontal ? root.handle-length : parent.width;
-        height: root.horizontal ? parent.height : root.handle-length;
+    thumb := Rectangle {
+        x: root.horizontal
+            ? (root.maximum > 0px
+                ? 2px + clamp((-root.value / root.maximum) * (root.track-length - self.width), 0px, max(0px, root.track-length - self.width))
+                : 2px)
+            : root.cross-inset;
+        y: root.horizontal
+            ? root.cross-inset
+            : (root.maximum > 0px
+                ? 2px + clamp((-root.value / root.maximum) * (root.track-length - self.height), 0px, max(0px, root.track-length - self.height))
+                : 2px);
+        width: root.horizontal ? root.handle-length : max(3px, parent.width - 2 * root.cross-inset);
+        height: root.horizontal ? max(3px, parent.height - 2 * root.cross-inset) : root.handle-length;
         // With nothing to scroll the handle would fill the whole track, which in
         // high contrast is a solid white lane that reads as a scroll position.
         visible: root.maximum > 0px;
-        border-radius: Theme.tokens.metrics.radius-small;
-        // The handle must read against both the track and the cells beside it:
-        // ink-secondary clears 3:1 on both; high contrast adds a dark edge.
-        border-width: Theme.active-theme == "high-contrast" ? 2px : 0px;
-        border-color: #000000;
-        background: scroll-track.pressed || scroll-track.has-hover
+        border-radius: (root.horizontal ? self.height : self.width) / 2;
+        border-width: root.hc ? 2px : 1px;
+        border-color: root.hc
+            ? #000000
+            : Theme.palette().border-strong.with-alpha(root.active ? 0.55 : 0.35);
+        background: root.hc
             ? Theme.palette().accent
-            : Theme.active-theme == "high-contrast" ? Theme.palette().accent
-            : Theme.palette().ink-secondary;
+            : root.active ? Theme.palette().accent.with-alpha(0.85)
+            : Theme.palette().ink-secondary.with-alpha(0.48);
     }
 
     function set-pos(pos: length) {
-        let span = max(1px, (root.horizontal ? root.width : root.height) - root.handle-length);
-        root.value = -clamp((pos - root.handle-length / 2.0) / span, 0.0, 1.0) * root.maximum;
+        let span = max(1px, root.track-length - root.handle-length);
+        root.value = -clamp((pos - 2px - root.handle-length / 2.0) / span, 0.0, 1.0) * root.maximum;
     }
 
     scroll-track := TouchArea {

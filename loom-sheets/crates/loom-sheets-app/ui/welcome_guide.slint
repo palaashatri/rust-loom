@@ -147,16 +147,30 @@ export component WelcomeGuideModal inherits Rectangle {
                 drop-shadow-color: Theme.palette().shadow;
 
                 content-layout := VerticalLayout {
+                    width: 100%;
                     spacing: Theme.tokens.space.md;
                     padding: Theme.tokens.space.xl;
                     alignment: start;
 
-                    step-label := Text {
-                        text: "Welcome Guide — Step " + (root.step + 1) + " of " + root.total-steps;
-                        font-size: Theme.type.caption;
-                        font-weight: 600;
-                        color: Theme.palette().accent;
-                        horizontal-alignment: Theme.rtl ? right : left;
+                    HorizontalLayout {
+                        spacing: Theme.tokens.space.sm;
+                        alignment: start;
+
+                        Image {
+                            source: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-sheets.512.png");
+                            width: 22px;
+                            height: 22px;
+                            image-fit: contain;
+                        }
+
+                        step-label := Text {
+                            text: "Welcome Guide — Step " + (root.step + 1) + " of " + root.total-steps;
+                            font-size: Theme.type.caption;
+                            font-weight: 600;
+                            color: Theme.palette().accent;
+                            horizontal-alignment: Theme.rtl ? right : left;
+                            vertical-alignment: center;
+                        }
                     }
 
                     title-text := Text {
@@ -169,12 +183,12 @@ export component WelcomeGuideModal inherits Rectangle {
                     }
 
                     body-scroll := Flickable {
-                        width: parent.width;
+                        horizontal-stretch: 1;
                         height: min(
                             body-layout.preferred-height,
                             max(120px, root.height - 230px * max(1.0, Theme.text-scale))
                         );
-                        viewport-width: parent.width;
+                        viewport-width: self.width;
                         viewport-height: max(self.height, body-layout.preferred-height);
 
                         body-layout := VerticalLayout {
@@ -183,7 +197,7 @@ export component WelcomeGuideModal inherits Rectangle {
                             alignment: start;
 
                             Text {
-                                width: parent.width;
+                                width: 100%;
                                 text: root.step-summary(root.step);
                                 font-size: Theme.type.body;
                                 color: Theme.palette().ink;
@@ -191,18 +205,19 @@ export component WelcomeGuideModal inherits Rectangle {
                                 wrap: word-wrap;
                             }
 
-                            Rectangle {
-                                width: parent.width;
-                                height: highlights-text.preferred-height + 2 * Theme.tokens.space.md;
+                            highlights-card := Rectangle {
+                                width: 100%;
+                                height: highlights-text.preferred-height + 2 * Theme.tokens.space.lg;
                                 border-radius: Theme.tokens.metrics.radius-medium;
                                 border-width: 1px;
                                 border-color: Theme.palette().border;
                                 background: Theme.palette().canvas;
+                                clip: true;
 
                                 highlights-text := Text {
-                                    x: Theme.tokens.space.md;
-                                    y: Theme.tokens.space.md;
-                                    width: max(0px, parent.width - 2 * Theme.tokens.space.md);
+                                    x: Theme.tokens.space.lg;
+                                    y: Theme.tokens.space.lg;
+                                    width: max(0px, parent.width - 2 * Theme.tokens.space.lg);
                                     text: root.step-highlights(root.step);
                                     font-size: Theme.type.caption;
                                     color: Theme.palette().ink-secondary;
@@ -212,7 +227,7 @@ export component WelcomeGuideModal inherits Rectangle {
                             }
 
                             Rectangle {
-                                width: parent.width;
+                                width: 100%;
                                 height: try-button.height;
                                 try-button := LoomButton {
                                     label: root.step-try-label(root.step);
@@ -227,7 +242,7 @@ export component WelcomeGuideModal inherits Rectangle {
                     }
 
                     footer := Rectangle {
-                        width: parent.width;
+                        horizontal-stretch: 1;
                         height: Theme.tokens.metrics.control-height;
 
                         close-button := LoomButton {

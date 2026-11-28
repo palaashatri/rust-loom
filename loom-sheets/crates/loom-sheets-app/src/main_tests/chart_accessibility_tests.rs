@@ -1271,3 +1271,58 @@ fn mixed_sign_bars_keep_a_shared_baseline_at_every_text_scale() {
         );
     }
 }
+
+#[test]
+fn dark_mode_chart_header_uses_unified_paper_tokens_without_dark_box() {
+    let mut light_patch: Option<Vec<[u8; 4]>> = None;
+    for theme in ["light", "dark", "high-contrast"] {
+        let app = chart_app("bar", &sample_categories(), &sample_values());
+        apply_theme(&app, theme);
+        let image = snapshot_component(&app, 1280.0, 720.0, 1.0).expect("render themed chart");
+        let actions = ElementHandle::find_by_element_id(&app, "SheetChartHeader::header-actions")
+            .next()
+            .expect("SheetChartHeader::header-actions");
+        let pos = actions.absolute_position();
+        let size = actions.size();
+        let x0 = (pos.x + 2.0).ceil() as u32;
+        let x1 = (pos.x + size.width - 2.0).floor() as u32;
+        let y0 = (pos.y + 2.0).ceil() as u32;
+        let y1 = (pos.y + size.height - 2.0).floor() as u32;
+
+        let mut total_pixels = 0usize;
+        let mut paper_pixels = 0usize;
+        let mut ink_pixels = 0usize;
+        let mut patch = Vec::new();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let pixel = image.get_pixel(x, y).0;
+                patch.push(pixel);
+                total_pixels += 1;
+                let [r, g, b, _] = pixel;
+                if r >= 245 && g >= 245 && b >= 245 {
+                    paper_pixels += 1;
+                }
+                if r <= 60 && g <= 60 && b <= 65 {
+                    ink_pixels += 1;
+                }
+            }
+        }
+        assert!(
+            paper_pixels * 10 > total_pixels * 6,
+            "{theme}: chart header actions background must stay on the paper surface ({paper_pixels}/{total_pixels} paper px)"
+        );
+        assert!(
+            ink_pixels > 0,
+            "{theme}: chart header actions must render legible paper-ink glyph pixels"
+        );
+        if theme == "light" {
+            light_patch = Some(patch);
+        } else if theme == "dark" {
+            assert_eq!(
+                Some(&patch),
+                light_patch.as_ref(),
+                "dark mode chart header actions must match light mode paper-surface styling identically"
+            );
+        }
+    }
+}

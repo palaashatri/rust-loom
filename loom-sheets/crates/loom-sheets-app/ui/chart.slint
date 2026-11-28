@@ -456,13 +456,14 @@ export component SheetChart inherits Rectangle {
         }
 
         data-list := Rectangle {
-            // Shrinks toward a floor that still fits the point heading and three help lines.
-            min-height: 16px + (10px + 1.25 * (Theme.tokens.typography.body-large + 3 * Theme.tokens.typography.caption)) * max(1.0, root.text-scale);
-            preferred-height: min(140px * max(1.0, root.text-scale), root.height * 0.45);
+            // Compact paper-surface footer at rest; highlights when keyboard
+            // focus enters chart data while preserving UI-36 reading & scroll paths.
+            min-height: 10px + (8px + 1.25 * (Theme.tokens.typography.caption + 3 * Theme.tokens.typography.micro)) * max(1.0, root.text-scale);
+            preferred-height: min(108px * max(1.0, root.text-scale), root.height * 0.38);
             vertical-stretch: 0;
-            background: Doc.well;
+            background: Theme.palette().paper;
             border-width: 1px;
-            border-color: Doc.line;
+            border-color: Theme.palette().paper-line;
             border-radius: Theme.tokens.space.xs;
             accessible-role: list;
             accessible-label: root.title + " chart data";
@@ -481,13 +482,13 @@ export component SheetChart inherits Rectangle {
             }
 
             if root.point-count > 0 : Rectangle {
-                x: 8px;
-                y: 8px;
-                width: parent.width - 16px;
-                height: parent.height - 16px;
-                background: Doc.select-soft;
+                x: 4px;
+                y: 4px;
+                width: parent.width - 8px;
+                height: parent.height - 8px;
+                background: root.data-focused ? Doc.select-soft : Doc.well;
                 border-width: 1px;
-                border-color: Doc.line;
+                border-color: root.data-focused ? Doc.ring : Theme.palette().paper-line;
                 border-radius: Theme.tokens.space.xs;
                 accessible-role: list-item;
                 accessible-label: root.point-label();
@@ -499,21 +500,21 @@ export component SheetChart inherits Rectangle {
                     spacing: 1px * max(1.0, root.text-scale);
                     padding-left: 8px * max(1.0, root.text-scale);
                     padding-right: 8px * max(1.0, root.text-scale);
-                    padding-top: 4px * max(1.0, root.text-scale);
-                    padding-bottom: 4px * max(1.0, root.text-scale);
+                    padding-top: 3px * max(1.0, root.text-scale);
+                    padding-bottom: 3px * max(1.0, root.text-scale);
                     point-heading := Text {
                         text: "Point " + (root.selected-point + 1) + " of " + root.point-count;
-                        font-size: Theme.tokens.typography.body-large * root.text-scale;
-                        font-weight: 700;
+                        font-size: Theme.tokens.typography.caption * root.text-scale;
+                        font-weight: 600;
                         color: Theme.palette().paper-ink;
                         wrap: word-wrap;
                     }
                     category-viewport := Rectangle {
                         height: max(0px, min(
-                            Theme.tokens.typography.body-large * root.text-scale * 3.0 + 12px * max(1.0, root.text-scale),
+                            Theme.tokens.typography.body * root.text-scale * 3.0 + 12px * max(1.0, root.text-scale),
                             parent.height - point-heading.preferred-height
                                 - point-help-text.preferred-height
-                                - 10px * max(1.0, root.text-scale)
+                                - 8px * max(1.0, root.text-scale)
                         ));
                         clip: true;
 
@@ -535,8 +536,8 @@ export component SheetChart inherits Rectangle {
                                     text: root.point-label();
                                     width: parent.width;
                                     height: self.preferred-height;
-                                    font-size: Theme.tokens.typography.body-large * root.text-scale;
-                                    font-weight: 700;
+                                    font-size: Theme.tokens.typography.caption * root.text-scale;
+                                    font-weight: 600;
                                     color: Theme.palette().paper-ink;
                                     wrap: word-wrap;
                                 }
@@ -595,7 +596,7 @@ export component SheetChart inherits Rectangle {
                     }
                     point-help-text := Text {
                         text: "Left/Right: points · Home/End: jump · Tab then PgUp/PgDn: scroll details · Escape: grid";
-                        font-size: Theme.tokens.typography.caption * root.text-scale;
+                        font-size: Theme.tokens.typography.micro * root.text-scale;
                         color: Doc.muted;
                         wrap: word-wrap;
                     }

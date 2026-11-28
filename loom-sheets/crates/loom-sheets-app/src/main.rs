@@ -4,6 +4,8 @@
     windows_subsystem = "windows"
 )]
 
+mod macos_window_sync;
+
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -1507,6 +1509,11 @@ pub(crate) fn sync_window_title(app: &SheetsApp, state: &GuiState) {
         title.push_str(recovery_pause::TITLE_SUFFIX);
     }
     app.set_window_title(SharedString::from(title));
+    macos_window_sync::sync_window_state(
+        app,
+        state.is_dirty(),
+        state.save_path.borrow().as_deref(),
+    );
 }
 
 /// Apply a worker result only while it still represents the current workbook
@@ -2146,24 +2153,11 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     state.recompute_dirty_from_saved();
     recovery_pause::sync(&app, &state);
     sync_window_title(&app, &state);
+    macos_window_sync::init_app_icon();
     #[cfg(target_os = "windows")]
     windows_platform::install_alt_modifier_guard(&app);
     app.show().map_err(|e| e.to_string())?;
-    #[cfg(target_os = "macos")]
-    {
-        // The native window handle is available only after the event loop has
-        // created the window; apply the titlebar appearance then.
-        let weak = app.as_weak();
-        slint::invoke_from_event_loop(move || {
-            if let Some(app) = weak.upgrade() {
-                loom_desktop::macos_window::apply(
-                    &app.window().window_handle(),
-                    app.global::<crate::Theme>().get_active_theme().as_str(),
-                );
-            }
-        })
-        .ok();
-    }
+    macos_window_sync::attach_window(&app, &state);
     let _worker_completion_timer = start_workbook_worker_timer(&app, &state, &menu_service);
     let _open_completion_timer = start_file_timer_after_show(&app, &state, &menu_service);
     if let Some(path) = startup_open.filter(|_| session.opens_file) {

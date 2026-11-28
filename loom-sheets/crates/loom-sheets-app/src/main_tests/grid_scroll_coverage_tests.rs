@@ -156,3 +156,97 @@ fn compact_grid_stays_covered_during_moved_wheel_animation_and_settle() {
         advance_wheel_animation(&app, &canvas, delta, label);
     }
 }
+
+fn assert_projected_cols_cover_the_viewport(app: &SheetsApp, canvas: &ElementHandle, phase: &str) {
+    let projected_left = app.get_grid_col_offset() + app.get_grid_scroll_x();
+    let cols = app.get_cols();
+    let col_widths = app.get_grid_column_widths();
+    assert_eq!(
+        cols.row_count(),
+        col_widths.row_count(),
+        "each projected worksheet column must have a materialized width during {phase}"
+    );
+    let projected_cell_width = (0..cols.row_count())
+        .map(|col| {
+            col_widths
+                .row_data(col)
+                .expect("projected worksheet column must have a width")
+        })
+        .sum::<f32>();
+    let projected_right = projected_left + projected_cell_width;
+    let viewport_right = canvas.size().width - GRID_ROW_HEADER_WIDTH;
+    assert!(
+        projected_left <= 0.5,
+        "the virtual grid leaves a blank strip right of row headers during {phase}: projected left is {projected_left:.1}px"
+    );
+    assert!(
+        projected_right + 0.5 >= viewport_right,
+        "the projected worksheet cells leave a blank strip at the right during {phase}: cell right is {projected_right:.1}px, viewport right is {viewport_right:.1}px"
+    );
+}
+
+#[test]
+fn trackpad_horizontal_and_diagonal_wheel_scrolls_keep_columns_and_rows_covered() {
+    let (app, state) = scrollable_sheet();
+    // Extend sheet horizontally as well so horizontal wheel deltas are not clamped.
+    state.current.borrow_mut().set_str("AZ1000", "far-right");
+    project_current(&app, &state);
+    app.set_grid_scroll_x(-10.0 * GRID_COL_WIDTH);
+    app.set_grid_scroll_y(-INITIAL_SCROLL_ROW * GRID_ROW_HEIGHT);
+    scroll_projection::project_scroll(&app, &state);
+    i_slint_backend_testing::testing_backend::mock_elapsed_time(0);
+
+    let canvas = ElementHandle::find_by_accessible_label(&app, "Untitled cell canvas")
+        .next()
+        .expect("worksheet cell canvas");
+    let origin = canvas.absolute_position();
+    let size = canvas.size();
+    let position = i_slint_core::lengths::logical_point_from_api(slint::LogicalPosition::new(
+        origin.x + size.width / 2.0,
+        origin.y + size.height / 2.0,
+    ));
+
+    for (delta_x, delta_y, label) in [
+        (-800.0f32, 0.0f32, "horizontal trackpad scroll right"),
+        (320.0, 0.0, "horizontal trackpad scroll left"),
+        (-480.0, -720.0, "diagonal 2-finger trackpad scroll"),
+    ] {
+        let prev_x = app.get_grid_scroll_x();
+        let prev_y = app.get_grid_scroll_y();
+        let result = slint::private_unstable_api::re_exports::WindowInner::from_pub(app.window())
+            .process_mouse_input(i_slint_core::input::MouseEvent::Wheel {
+                position,
+                delta_x: delta_x as i_slint_core::Coord,
+                delta_y: delta_y as i_slint_core::Coord,
+                phase: i_slint_core::input::TouchPhase::Moved,
+            });
+        assert!(
+            result.is_some_and(|r| r.accepted),
+            "Flickable must accept {label}"
+        );
+        for frame in 1..=(WHEEL_ANIMATION_MS / WHEEL_ANIMATION_FRAME_MS) {
+            i_slint_backend_testing::testing_backend::mock_elapsed_time(WHEEL_ANIMATION_FRAME_MS);
+            assert_projected_cols_cover_the_viewport(
+                &app,
+                &canvas,
+                &format!("{label} frame {frame}"),
+            );
+            assert_projected_rows_cover_the_viewport(
+                &app,
+                &canvas,
+                &format!("{label} frame {frame}"),
+            );
+        }
+        i_slint_backend_testing::testing_backend::mock_elapsed_time(WHEEL_SETTLE_MS);
+        if delta_x < 0.0 {
+            assert!(app.get_grid_scroll_x() < prev_x, "{label} must advance x");
+        } else if delta_x > 0.0 {
+            assert!(app.get_grid_scroll_x() > prev_x, "{label} must reverse x");
+        }
+        if delta_y < 0.0 {
+            assert!(app.get_grid_scroll_y() < prev_y, "{label} must advance y");
+        }
+        assert_projected_cols_cover_the_viewport(&app, &canvas, &format!("{label} settled"));
+        assert_projected_rows_cover_the_viewport(&app, &canvas, &format!("{label} settled"));
+    }
+}
