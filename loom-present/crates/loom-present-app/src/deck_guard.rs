@@ -58,6 +58,7 @@ pub(crate) fn content_matches(left: &PresentationDocument, right: &PresentationD
                 && left.elements == right.elements
                 && left.speaker_notes == right.speaker_notes
                 && left.bg_color == right.bg_color
+                && left.dynamic_bg == right.dynamic_bg
         })
 }
 

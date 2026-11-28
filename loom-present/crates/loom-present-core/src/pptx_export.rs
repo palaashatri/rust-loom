@@ -630,8 +630,23 @@ fn slide_xml(
         }
         next_id += 1;
     }
+    let bg_fill_xml = if let Some(ref dynamic_bg) = slide.dynamic_bg {
+        let mut stops = String::new();
+        for (pos, hex) in dynamic_bg.ooxml_gradient_stops() {
+            stops.push_str(&format!(
+                "<a:gs pos=\"{pos}\"><a:srgbClr val=\"{hex}\"/></a:gs>"
+            ));
+        }
+        let ang =
+            ((dynamic_bg.preset.gradient_angle_deg().rem_euclid(360.0)) * 60_000.0).round() as u32;
+        format!(
+            "<a:gradFill rotWithShape=\"1\"><a:gsLst>{stops}</a:gsLst><a:lin ang=\"{ang}\" scaled=\"1\"/></a:gradFill>"
+        )
+    } else {
+        format!("<a:solidFill><a:srgbClr val=\"{background}\"/></a:solidFill>")
+    };
     format!(
-        "{XML_DECL}<p:sld {NS}><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"{background}\"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>{GROUP_PROPS}{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{}</p:sld>",
+        "{XML_DECL}<p:sld {NS}><p:cSld><p:bg><p:bgPr>{bg_fill_xml}<a:effectLst/></p:bgPr></p:bg><p:spTree>{GROUP_PROPS}{shapes}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>{}</p:sld>",
         transition_xml(transition)
     )
 }

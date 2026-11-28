@@ -960,6 +960,7 @@ fn refresh_with_recovery(app: &PresentApp, state: &GuiState, recover: bool) {
     // borrows the session again.
     drop(drag);
     drop(session);
+    dynamic_bg_view::sync(app, state);
     if let Some(menu_service) = &state.menu_service {
         sync_menu_state(menu_service, app, state);
     }
@@ -2053,6 +2054,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
     deck_guard::wire(app, state);
     table_actions::wire(app, state);
     element_style_ui::wire(app, state);
+    dynamic_bg_view::wire(app, state);
     modal_wiring::wire(app, state);
     recovery_deferred::wire_callbacks(app, state);
     {
@@ -3020,6 +3022,9 @@ mod appearance_tests;
 mod clipboard_actions;
 mod command_dispatch;
 mod deck_guard;
+#[cfg(test)]
+mod dynamic_bg_tests;
+mod dynamic_bg_view;
 mod find_replace_ui;
 mod font_picker;
 mod modal_wiring;

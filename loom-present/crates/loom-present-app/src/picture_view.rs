@@ -101,6 +101,9 @@ pub(crate) fn images_for(document: &PresentationDocument, slide: Option<&Slide>)
 fn fingerprint(document: &PresentationDocument, slide: &Slide) -> String {
     let mut hasher = DefaultHasher::new();
     slide.bg_color.hash(&mut hasher);
+    if let Some(ref bg) = slide.dynamic_bg {
+        bg.hash_key(&mut hasher);
+    }
     for element in &slide.elements {
         element.id.hash(&mut hasher);
         element_type_index(&element.element_type).hash(&mut hasher);
@@ -177,6 +180,11 @@ pub(crate) fn rows_for(document: &PresentationDocument, slide: Option<&Slide>) -
                 }
             })
             .unwrap_or_else(|| slint::Color::from_argb_encoded(0xFFFF_FFFF)),
+        has_dynamic_bg: slide.and_then(|s| s.dynamic_bg.as_ref()).is_some(),
+        dynamic_bg_image: slide
+            .and_then(|s| s.dynamic_bg.as_ref())
+            .map(crate::dynamic_bg_view::thumbnail_image)
+            .unwrap_or_default(),
     }
 }
 

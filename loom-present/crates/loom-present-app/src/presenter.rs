@@ -190,6 +190,16 @@ fn copy_theme(app: &PresentApp, window: &PresenterWindow) {
     theme.set_ui_font_family(source.get_ui_font_family());
 }
 
+/// Pushes the active live dynamic-background frame to an open presenter window.
+pub(crate) fn update_dynamic_bg(has_bg: bool, image: slint::Image) {
+    PRESENTER.with(|cell| {
+        if let Some(presenter) = cell.borrow().as_ref() {
+            presenter.window.set_has_dynamic_bg(has_bg);
+            presenter.window.set_dynamic_bg_image(image);
+        }
+    });
+}
+
 /// Re-applies the main window's appearance to an open presenter window.
 pub(crate) fn mirror_theme(app: &PresentApp) {
     PRESENTER.with(|cell| {

@@ -189,7 +189,7 @@ pub(crate) const TEMPLATE_NAMES: [&str; 4] = [
     "Image and Text",
 ];
 
-pub(crate) const ALL_TEMPLATE_IDS: [&str; 12] = [
+pub(crate) const ALL_TEMPLATE_IDS: [&str; 18] = [
     "blank",
     "title-content",
     "two-columns",
@@ -202,6 +202,12 @@ pub(crate) const ALL_TEMPLATE_IDS: [&str; 12] = [
     "academic-lecture",
     "workshop-deck",
     "minimal-stage",
+    "dynamic-aurora",
+    "dynamic-solar",
+    "dynamic-oceanic",
+    "dynamic-prism",
+    "dynamic-obsidian",
+    "dynamic-botanical",
 ];
 
 pub(crate) fn template_name(choice: i32) -> &'static str {
@@ -215,6 +221,12 @@ pub(crate) fn template_name(choice: i32) -> &'static str {
         9 => "Academic Lecture",
         10 => "Workshop Deck",
         11 => "Minimal Stage",
+        12 => "Aurora Veil",
+        13 => "Solar Mesh",
+        14 => "Oceanic Silk",
+        15 => "Prism Glass",
+        16 => "Obsidian Orbs",
+        17 => "Botanical Mist",
         _ => TEMPLATE_NAMES[0],
     }
 }
@@ -222,7 +234,7 @@ pub(crate) fn template_name(choice: i32) -> &'static str {
 /// The deck a template creates, built on `blank` (the app's empty one-slide
 /// deck). An unknown index gives the blank deck.
 pub(crate) fn template_session(blank: PresentationSession, choice: i32) -> PresentationSession {
-    if (4..=11).contains(&choice) {
+    if (4..=17).contains(&choice) {
         let id = ALL_TEMPLATE_IDS[choice as usize];
         let doc = loom_present_core::templates::document_from_template(id, "Untitled Presentation");
         return PresentationSession::new(doc);

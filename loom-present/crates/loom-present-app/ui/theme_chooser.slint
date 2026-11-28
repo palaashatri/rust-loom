@@ -159,6 +159,7 @@ export component PresentThemeChooser inherits Rectangle {
         if (root.theme-category == 3 && idx == 0) { return true; }
         if (root.theme-category == 4 && idx >= 4 && idx <= 7) { return true; }
         if (root.theme-category == 5 && idx >= 8 && idx <= 11) { return true; }
+        if (root.theme-category == 6 && idx >= 12 && idx <= 17) { return true; }
         return false;
     }
 
@@ -176,16 +177,17 @@ export component PresentThemeChooser inherits Rectangle {
             root.theme-selected = root.theme-visible(0) ? 0
                 : root.theme-visible(2) ? 2
                 : root.theme-visible(4) ? 4
-                : 8;
+                : root.theme-visible(8) ? 8
+                : 12;
         }
         root.choose-theme-category(cat);
     }
 
     function step-theme(delta: int) {
         let s = root.theme-selected;
-        if (s + delta >= 0 && s + delta <= 11 && root.theme-visible(s + delta)) { root.theme-selected = s + delta; }
-        else if (s + 2 * delta >= 0 && s + 2 * delta <= 11 && root.theme-visible(s + 2 * delta)) { root.theme-selected = s + 2 * delta; }
-        else if (s + 3 * delta >= 0 && s + 3 * delta <= 11 && root.theme-visible(s + 3 * delta)) { root.theme-selected = s + 3 * delta; }
+        if (s + delta >= 0 && s + delta <= 17 && root.theme-visible(s + delta)) { root.theme-selected = s + delta; }
+        else if (s + 2 * delta >= 0 && s + 2 * delta <= 17 && root.theme-visible(s + 2 * delta)) { root.theme-selected = s + 2 * delta; }
+        else if (s + 3 * delta >= 0 && s + 3 * delta <= 17 && root.theme-visible(s + 3 * delta)) { root.theme-selected = s + 3 * delta; }
     }
 
     width: 100%;
@@ -206,7 +208,7 @@ export component PresentThemeChooser inherits Rectangle {
             if (event.text == Key.LeftArrow) { root.step-theme(Theme.rtl ? 1 : -1); return accept; }
             if (event.text == Key.RightArrow) { root.step-theme(Theme.rtl ? -1 : 1); return accept; }
             if (event.text == Key.UpArrow) { root.pick-category(max(0, root.theme-category - 1)); return accept; }
-            if (event.text == Key.DownArrow) { root.pick-category(min(5, root.theme-category + 1)); return accept; }
+            if (event.text == Key.DownArrow) { root.pick-category(min(6, root.theme-category + 1)); return accept; }
             if (event.text == Key.Tab && !event.modifiers.shift && create-button.has-focus) { chooser-focus.focus(); return accept; }
             if ((event.text == Key.Backtab || (event.text == Key.Tab && event.modifiers.shift)) && chooser-focus.has-focus) { create-button.grab-focus(); return accept; }
             return reject;
@@ -267,6 +269,7 @@ export component PresentThemeChooser inherits Rectangle {
                         PresentThemeCategory { icon: "stop"; label: "Blank"; active: root.theme-category == 3; clicked => { root.pick-category(3); } }
                         PresentThemeCategory { icon: "grid"; label: "Business"; active: root.theme-category == 4; clicked => { root.pick-category(4); } }
                         PresentThemeCategory { icon: "document"; label: "Editorial"; active: root.theme-category == 5; clicked => { root.pick-category(5); } }
+                        PresentThemeCategory { icon: "sparkle"; label: "Dynamic"; active: root.theme-category == 6; clicked => { root.pick-category(6); } }
 
                         Rectangle { vertical-stretch: 1; background: transparent; }
                     }
@@ -322,7 +325,13 @@ export component PresentThemeChooser inherits Rectangle {
                             property <float> slot-9: self.slot-8 + (root.theme-visible(8) ? 1 : 0);
                             property <float> slot-10: self.slot-9 + (root.theme-visible(9) ? 1 : 0);
                             property <float> slot-11: self.slot-10 + (root.theme-visible(10) ? 1 : 0);
-                            property <float> count: self.slot-11 + (root.theme-visible(11) ? 1 : 0);
+                            property <float> slot-12: self.slot-11 + (root.theme-visible(11) ? 1 : 0);
+                            property <float> slot-13: self.slot-12 + (root.theme-visible(12) ? 1 : 0);
+                            property <float> slot-14: self.slot-13 + (root.theme-visible(13) ? 1 : 0);
+                            property <float> slot-15: self.slot-14 + (root.theme-visible(14) ? 1 : 0);
+                            property <float> slot-16: self.slot-15 + (root.theme-visible(15) ? 1 : 0);
+                            property <float> slot-17: self.slot-16 + (root.theme-visible(16) ? 1 : 0);
+                            property <float> count: self.slot-17 + (root.theme-visible(17) ? 1 : 0);
                             property <float> rows: ceil(self.count / self.columns);
                             height: self.rows * self.card-height + max(0.0, self.rows - 1.0) * self.gap;
 
@@ -370,6 +379,12 @@ export component PresentThemeChooser inherits Rectangle {
                                 { idx: 9, slot: theme-grid.slot-9, id: "academic-lecture", name: "Academic Lecture" },
                                 { idx: 10, slot: theme-grid.slot-10, id: "workshop-deck", name: "Workshop Deck" },
                                 { idx: 11, slot: theme-grid.slot-11, id: "minimal-stage", name: "Minimal Stage" },
+                                { idx: 12, slot: theme-grid.slot-12, id: "dynamic-aurora", name: "Aurora Veil" },
+                                { idx: 13, slot: theme-grid.slot-13, id: "dynamic-solar", name: "Solar Mesh" },
+                                { idx: 14, slot: theme-grid.slot-14, id: "dynamic-oceanic", name: "Oceanic Silk" },
+                                { idx: 15, slot: theme-grid.slot-15, id: "dynamic-prism", name: "Prism Glass" },
+                                { idx: 16, slot: theme-grid.slot-16, id: "dynamic-obsidian", name: "Obsidian Orbs" },
+                                { idx: 17, slot: theme-grid.slot-17, id: "dynamic-botanical", name: "Botanical Mist" },
                             ] : Rectangle {
                                 visible: root.theme-visible(item.idx);
                                 x: theme-grid.x-of(item.slot);

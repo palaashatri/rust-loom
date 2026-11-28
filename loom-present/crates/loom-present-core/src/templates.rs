@@ -1,5 +1,6 @@
 use crate::{
-    ElementStyle, ElementType, PresentationDocument, PresentationSession, Slide, SlideElement,
+    DynamicBackground, DynamicBgPreset, ElementStyle, ElementType, PresentationDocument,
+    PresentationSession, Slide, SlideElement,
 };
 use serde::{Deserialize, Serialize};
 
@@ -240,7 +241,114 @@ pub fn template_catalog() -> Vec<TemplateDescriptor> {
                 body_font: "Inter".into(),
             },
         },
+        TemplateDescriptor {
+            id: "dynamic-aurora",
+            name: "Aurora Veil",
+            description: "Animated northern-lights veil over deep midnight sky",
+            theme: SlideTheme {
+                id: "dynamic-aurora".into(),
+                name: "Aurora Veil".into(),
+                background: "#0B1226".into(),
+                surface: "#16213E".into(),
+                ink: "#F8FAFC".into(),
+                muted_ink: "#CBD5E1".into(),
+                accent: "#14B8A6".into(),
+                accent_secondary: "#38BDF8".into(),
+                heading_font: "Inter".into(),
+                body_font: "Inter".into(),
+            },
+        },
+        TemplateDescriptor {
+            id: "dynamic-solar",
+            name: "Solar Mesh",
+            description: "Animated warm amber & coral gradient mesh",
+            theme: SlideTheme {
+                id: "dynamic-solar".into(),
+                name: "Solar Mesh".into(),
+                background: "#26110B".into(),
+                surface: "#431407".into(),
+                ink: "#FFFBEB".into(),
+                muted_ink: "#FDE68A".into(),
+                accent: "#F59E0B".into(),
+                accent_secondary: "#FB7185".into(),
+                heading_font: "Inter".into(),
+                body_font: "Inter".into(),
+            },
+        },
+        TemplateDescriptor {
+            id: "dynamic-oceanic",
+            name: "Oceanic Silk",
+            description: "Animated silky deep-ocean cyan & teal currents",
+            theme: SlideTheme {
+                id: "dynamic-oceanic".into(),
+                name: "Oceanic Silk".into(),
+                background: "#061A2B".into(),
+                surface: "#0C2D48".into(),
+                ink: "#F0FDFA".into(),
+                muted_ink: "#99F6E4".into(),
+                accent: "#0D9488".into(),
+                accent_secondary: "#38BDF8".into(),
+                heading_font: "Inter".into(),
+                body_font: "Inter".into(),
+            },
+        },
+        TemplateDescriptor {
+            id: "dynamic-prism",
+            name: "Prism Glass",
+            description: "Animated luminous pastel glass caustics",
+            theme: SlideTheme {
+                id: "dynamic-prism".into(),
+                name: "Prism Glass".into(),
+                background: "#F3F0FF".into(),
+                surface: "#FFFFFF".into(),
+                ink: "#1E1B4B".into(),
+                muted_ink: "#4C1D95".into(),
+                accent: "#7C3AED".into(),
+                accent_secondary: "#0284C7".into(),
+                heading_font: "Inter".into(),
+                body_font: "Inter".into(),
+            },
+        },
+        TemplateDescriptor {
+            id: "dynamic-obsidian",
+            name: "Obsidian Orbs",
+            description: "Animated violet & magenta orbs over matte obsidian",
+            theme: SlideTheme {
+                id: "dynamic-obsidian".into(),
+                name: "Obsidian Orbs".into(),
+                background: "#09090B".into(),
+                surface: "#18181B".into(),
+                ink: "#FAFAFA".into(),
+                muted_ink: "#D4D4D8".into(),
+                accent: "#9333EA".into(),
+                accent_secondary: "#EC4899".into(),
+                heading_font: "Inter".into(),
+                body_font: "Inter".into(),
+            },
+        },
+        TemplateDescriptor {
+            id: "dynamic-botanical",
+            name: "Botanical Mist",
+            description: "Animated emerald & sage mist over forest dark",
+            theme: SlideTheme {
+                id: "dynamic-botanical".into(),
+                name: "Botanical Mist".into(),
+                background: "#0A1F18".into(),
+                surface: "#14532D".into(),
+                ink: "#F0FDF4".into(),
+                muted_ink: "#BBF7D0".into(),
+                accent: "#10B981".into(),
+                accent_secondary: "#84CC16".into(),
+                heading_font: "Inter".into(),
+                body_font: "Inter".into(),
+            },
+        },
     ]
+}
+
+/// Returns the built-in [`DynamicBgPreset`] associated with a dynamic template ID, if any.
+pub fn template_dynamic_preset(template_id: &str) -> Option<DynamicBgPreset> {
+    DynamicBgPreset::from_id(template_id)
 }
 
 fn make_elem(
@@ -279,8 +387,10 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
         .find(|t| t.id == template_id)
         .unwrap_or_else(|| template_catalog().into_iter().next().unwrap());
     let mut doc = PresentationDocument::new(format!("deck-{template_id}"), title);
+    let dynamic_bg = template_dynamic_preset(desc.id).map(DynamicBackground::new);
     let mut slide1 = Slide::new("slide-1", title, "16:9");
     slide1.bg_color = desc.theme.background.clone();
+    slide1.dynamic_bg = dynamic_bg.clone();
 
     if desc.id != "blank" && desc.id != "two-columns" && desc.id != "image-text" {
         slide1.elements.push(make_elem(
@@ -317,6 +427,12 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
             | "academic-lecture"
             | "workshop-deck"
             | "minimal-stage"
+            | "dynamic-aurora"
+            | "dynamic-solar"
+            | "dynamic-oceanic"
+            | "dynamic-prism"
+            | "dynamic-obsidian"
+            | "dynamic-botanical"
     ) {
         slide1.elements.push(make_elem(
             "accent-bar-1",
@@ -330,6 +446,7 @@ pub fn document_from_template(template_id: &str, title: &str) -> PresentationDoc
         ));
         let mut slide2 = Slide::new("slide-2", "Key Highlights", "16:9");
         slide2.bg_color = desc.theme.background.clone();
+        slide2.dynamic_bg = dynamic_bg;
         slide2.elements.push(make_elem(
             "title-2",
             ElementType::Title,
@@ -448,9 +565,11 @@ pub fn apply_theme_preset(session: &mut PresentationSession, theme_id: &str) -> 
         .into_iter()
         .find(|t| t.id == theme_id)
         .ok_or_else(|| format!("Unknown theme preset '{theme_id}'"))?;
+    let dynamic_bg = template_dynamic_preset(theme_id).map(DynamicBackground::new);
     session.checkpoint();
     for slide in &mut session.document.slides {
         slide.bg_color = desc.theme.background.clone();
+        slide.dynamic_bg = dynamic_bg.clone();
         for elem in &mut slide.elements {
             match elem.element_type {
                 ElementType::Title | ElementType::Subtitle => {
@@ -515,5 +634,70 @@ mod tests {
         let run = &session.document.slides[0].elements[1].runs[0];
         assert_eq!(run.color.as_deref(), Some("#F8FAFC"));
         assert_eq!(run.font_family.as_deref(), Some("Inter"));
+    }
+
+    #[test]
+    fn dynamic_templates_append_to_catalog_and_export_to_pptx_and_pdf() {
+        let catalog = template_catalog();
+        assert_eq!(catalog.len(), 18, "12 original + 6 dynamic templates");
+        let dynamic_ids = [
+            "dynamic-aurora",
+            "dynamic-solar",
+            "dynamic-oceanic",
+            "dynamic-prism",
+            "dynamic-obsidian",
+            "dynamic-botanical",
+        ];
+        for (offset, id) in dynamic_ids.iter().enumerate() {
+            assert_eq!(catalog[12 + offset].id, *id);
+            let doc = document_from_template(id, "Dynamic Demo");
+            assert_eq!(doc.slides.len(), 2);
+            let expected_preset = DynamicBgPreset::from_id(id).expect("preset");
+            assert_eq!(
+                doc.slides[0].dynamic_bg.as_ref().map(|b| b.preset),
+                Some(expected_preset)
+            );
+            assert_eq!(
+                doc.slides[1].dynamic_bg.as_ref().map(|b| b.preset),
+                Some(expected_preset)
+            );
+        }
+
+        // PPTX emits native <p:bg><p:bgPr><a:gradFill> for dynamic background slides.
+        let doc = document_from_template("dynamic-aurora", "Aurora Deck");
+        let session = PresentationSession::new(doc.clone());
+        let pptx = crate::export_pptx(&session).expect("pptx export");
+        let archive = loom_package::zip::PackageArchive::from_bytes(&pptx).expect("zip");
+        let slide1_xml = std::str::from_utf8(
+            archive
+                .get("ppt/slides/slide1.xml")
+                .expect("slide1.xml present"),
+        )
+        .expect("utf8");
+        assert!(
+            slide1_xml.contains("<p:bg><p:bgPr><a:gradFill"),
+            "PPTX must emit native gradFill for dynamic_bg: {slide1_xml}"
+        );
+        assert!(slide1_xml.contains("<a:gsLst>"));
+
+        // PDF paints the rendered dynamic background image behind slide elements.
+        let pdf_bytes = crate::export_pdf(&doc);
+        let pdf_text = String::from_utf8_lossy(&pdf_bytes);
+        assert!(
+            pdf_text.contains("/Subtype /Image /Width 320 /Height 180")
+                && pdf_text.contains("/Im0 "),
+            "PDF must embed and draw dynamic background image"
+        );
+
+        // Static slides keep solidFill in PPTX.
+        let static_session =
+            PresentationSession::new(document_from_template("title-content", "Plain"));
+        let static_pptx = crate::export_pptx(&static_session).expect("static pptx");
+        let static_archive =
+            loom_package::zip::PackageArchive::from_bytes(&static_pptx).expect("zip");
+        let static_slide_xml =
+            std::str::from_utf8(static_archive.get("ppt/slides/slide1.xml").unwrap()).unwrap();
+        assert!(static_slide_xml.contains("<a:solidFill>"));
+        assert!(!static_slide_xml.contains("<a:gradFill"));
     }
 }

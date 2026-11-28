@@ -3,6 +3,7 @@ import {
 } from "foundation.slint";
 import { Theme } from "theme.slint";
 import { ElementInk } from "object_part.slint";
+import { DynamicBgPicker } from "dynamic_bg_picker.slint";
 
 export component PresentDocumentSection inherits VerticalLayout {
     in property <int> deck-theme-index: 0;
@@ -19,7 +20,9 @@ export component PresentDocumentSection inherits VerticalLayout {
     }
 
     LoomSectionHeader { title: "Slide Background"; }
-    LoomColorWell {
+    DynamicBgPicker { }
+
+    if !ElementInk.has-dynamic-bg : LoomColorWell {
         width: parent.width;
         label: "Background";
         accessible-name: "Slide Background";
@@ -32,7 +35,7 @@ export component PresentDocumentSection inherits VerticalLayout {
         toggled => { ElementInk.color-toggled("bg"); }
     }
 
-    if ElementInk.active-palette == "bg" : LoomColorPalette {
+    if !ElementInk.has-dynamic-bg && ElementInk.active-palette == "bg" : LoomColorPalette {
         width: parent.width;
         swatches: ElementInk.color-swatches;
         selected-hex: ElementInk.bg-color-hex;
