@@ -313,14 +313,33 @@ export component WelcomeGuideModal inherits Rectangle {
                                 }
                             }
 
-                            Text {
-                                text: root.step-title(root.clamped-step());
-                                color: Theme.palette().ink;
-                                font-family: Theme.ui-font-family;
-                                font-size: Theme.type.display;
-                                font-weight: 700;
-                                wrap: word-wrap;
-                                horizontal-alignment: Theme.rtl ? right : left;
+                            HorizontalLayout {
+                                spacing: Theme.tokens.space.md;
+                                if !Theme.rtl : Image {
+                                    width: 32px;
+                                    height: 32px;
+                                    source: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-writer.512.png");
+                                    image-fit: contain;
+                                    vertical-alignment: center;
+                                }
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: root.step-title(root.clamped-step());
+                                    color: Theme.palette().ink;
+                                    font-family: Theme.ui-font-family;
+                                    font-size: Theme.type.display;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                    horizontal-alignment: Theme.rtl ? right : left;
+                                    vertical-alignment: center;
+                                }
+                                if Theme.rtl : Image {
+                                    width: 32px;
+                                    height: 32px;
+                                    source: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-writer.512.png");
+                                    image-fit: contain;
+                                    vertical-alignment: center;
+                                }
                             }
 
                             lesson-scroll := Flickable {

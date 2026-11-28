@@ -76,6 +76,18 @@ pub(crate) fn wire(app: &WriterApp, state: &Rc<GuiState>) {
             handle_table_key(&app, &state, key.as_str(), shift, ctrl, alt)
         });
     }
+    {
+        let state = state.clone();
+        let app_ref = app.as_weak();
+        app.global::<crate::WriterFormatState>().on_cocoa_key(
+            move |key, shift, ctrl, alt, meta| {
+                let Some(app) = app_ref.upgrade() else {
+                    return false;
+                };
+                crate::caret_keys::handle_cocoa(&app, &state, key.as_str(), shift, ctrl, alt, meta)
+            },
+        );
+    }
 }
 
 /// Inserts a new table block of given dimensions at the current caret.

@@ -14,12 +14,15 @@ pub(crate) fn display_title(save_path: Option<&Path>, document_title: &str) -> S
 }
 
 pub(crate) fn sync(app: &crate::WriterApp, state: &crate::GuiState) {
-    let title = display_title(
-        state.save_path.borrow().as_deref(),
-        &state.current.borrow().title,
-    );
-    app.set_window_title(window_title(&title, crate::document_is_dirty(state)).into());
+    use slint::ComponentHandle;
+    let dirty = crate::document_is_dirty(state);
+    let save_path = state.save_path.borrow();
+    let title = display_title(save_path.as_deref(), &state.current.borrow().title);
+    app.set_window_title(window_title(&title, dirty).into());
     app.set_doc_title(title.into());
+    let handle = app.window().window_handle();
+    loom_desktop::macos_window::set_document_edited(&handle, dirty);
+    loom_desktop::macos_window::set_represented_path(&handle, save_path.as_deref());
 }
 
 /// The window title: the document's name, starred while it has unsaved

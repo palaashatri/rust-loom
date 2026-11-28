@@ -11,6 +11,7 @@ mod appearance;
 mod caret_keys;
 mod caret_scroll;
 mod clipboard_actions;
+mod cocoa_keys;
 mod command_dispatch;
 mod document_formatting;
 mod docx_actions;
@@ -3705,6 +3706,7 @@ fn run_gui_with_dialogs(args: &Args, dialogs: Rc<dyn FileDialogService>) -> Resu
     #[cfg(all(target_os = "windows", not(test)))]
     windows_platform::install_alt_modifier_guard(&app);
     window_chrome::start(&app, appearance::APPLICATION_ID);
+    window_chrome::init_macos_polish(&app);
     configure_direction(&app, args.rtl);
     // The saved appearance, unless `--theme` was given.
     appearance::start(

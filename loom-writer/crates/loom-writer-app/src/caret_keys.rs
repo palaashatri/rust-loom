@@ -21,6 +21,22 @@ thread_local! {
     static GOAL_COLUMN: Cell<Option<(usize, f32)>> = const { Cell::new(None) };
 }
 
+pub(crate) fn clear_goal_column() {
+    GOAL_COLUMN.with(|goal| goal.set(None));
+}
+
+pub(crate) fn handle_cocoa(
+    app: &WriterApp,
+    state: &GuiState,
+    key: &str,
+    shift: bool,
+    ctrl: bool,
+    alt: bool,
+    meta: bool,
+) -> bool {
+    crate::cocoa_keys::handle(app, state, key, shift, ctrl, alt, meta)
+}
+
 /// Handles Up, Down, Home and End (Shift extends), and Left and Right inside
 /// right-to-left text; returns whether the key was consumed. Left and Right in
 /// left-to-right text, and a plain Left or Right over a selection, are left to

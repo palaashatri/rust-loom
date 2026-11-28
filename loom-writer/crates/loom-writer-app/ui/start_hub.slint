@@ -278,15 +278,11 @@ export component StartHubModal inherits Rectangle {
 
                     brand-row := Rectangle {
                         height: max(40px, brand-text.preferred-height);
-                        emblem := Rectangle {
+                        emblem := Image {
                             x: Theme.rtl ? parent.width - self.width : 0px; y: (parent.height - self.height) / 2;
-                            width: 36px; height: 36px; border-radius: Theme.tokens.metrics.radius-medium;
-                            background: Theme.palette().accent;
-                            drop-shadow-blur: 6px; drop-shadow-offset-y: 2px; drop-shadow-color: Theme.palette().shadow;
-                            Icon {
-                                x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2;
-                                size: 18px; icon: "document"; tint: Theme.palette().accent-ink;
-                            }
+                            width: 36px; height: 36px;
+                            source: @image-url("../../../../loom-core/crates/loom-ui/ui/app-icons/loom-writer.512.png");
+                            image-fit: contain;
                         }
                         brand-text := VerticalLayout {
                             property <length> lead-w: emblem.width + Theme.tokens.space.md;

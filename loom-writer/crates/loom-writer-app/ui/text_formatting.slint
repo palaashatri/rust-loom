@@ -56,6 +56,13 @@ export component WriterFormatTab inherits VerticalLayout {
     property <bool> font-size-invalid: false;
     property <bool> paragraph-options-expanded: false;
     property <bool> baseline-options-expanded: false;
+    property <int> table-subtab: 1;
+
+    changed is-table-selected => {
+        if (root.is-table-selected) {
+            root.table-subtab = 1;
+        }
+    }
 
     changed font-size-value => {
         root.font-size-draft = root.font-size-value;
@@ -63,7 +70,16 @@ export component WriterFormatTab inherits VerticalLayout {
     }
             spacing: Theme.tokens.space.sm;
 
-            if root.is-table-selected : WriterTableInspector {
+            if root.is-table-selected : VerticalLayout {
+                padding-left: Theme.tokens.space.xl;
+                padding-right: Theme.tokens.space.xl;
+                LoomSegmentedControl {
+                    items: ["Text", "Table"];
+                    current <=> root.table-subtab;
+                    label: "Format Scope";
+                }
+            }
+            if root.is-table-selected && root.table-subtab == 1 : WriterTableInspector {
                 current-style-id <=> root.table-style-id;
                 header-row <=> root.table-header-row;
                 banded-rows <=> root.table-banded-rows;
@@ -72,7 +88,9 @@ export component WriterFormatTab inherits VerticalLayout {
                 toggle-table-option(opt) => { root.toggle-table-option(opt); }
                 table-action(act) => { root.table-action(act); }
             }
-            if root.is-table-selected : InspectorDivider { }
+
+        if !root.is-table-selected || root.table-subtab == 0 : VerticalLayout {
+            spacing: Theme.tokens.space.sm;
 
         LoomSectionHeader { title: "Text Style"; }
 
@@ -499,5 +517,6 @@ export component WriterFormatTab inherits VerticalLayout {
                     }
                 }
             }
+        }
         }
 }

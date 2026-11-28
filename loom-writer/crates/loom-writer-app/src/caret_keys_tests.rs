@@ -360,3 +360,119 @@ fn home_and_end_at_top_and_bottom_document_edges_keep_margin_clearance() {
         "Down on the last line lands at document end"
     );
 }
+
+fn press_chord(app: &WriterApp, modifiers: &[Key], key: impl Into<SharedString>) {
+    for m in modifiers {
+        app.window().dispatch_event(WindowEvent::KeyPressed {
+            text: SharedString::from(*m),
+        });
+    }
+    dispatch(app, key);
+    for m in modifiers.iter().rev() {
+        app.window().dispatch_event(WindowEvent::KeyReleased {
+            text: SharedString::from(*m),
+        });
+    }
+}
+
+#[test]
+fn cocoa_word_and_line_navigation_and_deletion() {
+    let s = launched("alpha beta gamma\nsecond line");
+    s.app.set_shortcut_modifier("Cmd".into());
+
+    // Option+Right / Option+Left word navigation and Shift extension via real WindowEvent dispatch
+    at(&s, 0);
+    press_chord(&s.app, &[Key::Alt], SharedString::from(Key::RightArrow));
+    assert_eq!(focus(&s.state), 5, "Option+Right jumps to end of 'alpha'");
+    press_chord(
+        &s.app,
+        &[Key::Alt, Key::Shift],
+        SharedString::from(Key::RightArrow),
+    );
+    assert_eq!(s.state.current.borrow().selection().anchor, 5);
+    assert_eq!(
+        focus(&s.state),
+        10,
+        "Option+Shift+Right extends over ' beta'"
+    );
+    press_chord(&s.app, &[Key::Alt], SharedString::from(Key::LeftArrow));
+    assert_eq!(focus(&s.state), 6, "Option+Left jumps to start of 'beta'");
+
+    // Cmd+Right / Cmd+Left line end / start and Shift extension
+    press_chord(&s.app, &[Key::Meta], SharedString::from(Key::RightArrow));
+    assert_eq!(focus(&s.state), 16, "Cmd+Right jumps to line 1 end");
+    press_chord(
+        &s.app,
+        &[Key::Meta, Key::Shift],
+        SharedString::from(Key::LeftArrow),
+    );
+    assert_eq!(s.state.current.borrow().selection().anchor, 16);
+    assert_eq!(focus(&s.state), 0, "Cmd+Shift+Left selects to line 1 start");
+
+    // Cmd+Down / Cmd+Up doc end / start and Shift extension
+    press_chord(&s.app, &[Key::Meta], SharedString::from(Key::DownArrow));
+    assert_eq!(focus(&s.state), 28, "Cmd+Down jumps to document end");
+    press_chord(
+        &s.app,
+        &[Key::Meta, Key::Shift],
+        SharedString::from(Key::UpArrow),
+    );
+    assert_eq!(s.state.current.borrow().selection().anchor, 28);
+    assert_eq!(focus(&s.state), 0, "Cmd+Shift+Up selects to document start");
+
+    // Option+Backspace deletes word backward
+    at(&s, 10);
+    press_chord(&s.app, &[Key::Alt], SharedString::from(Key::Backspace));
+    assert_eq!(
+        s.state.current.borrow().editor_text(),
+        "alpha  gamma\nsecond line"
+    );
+
+    // Cmd+Backspace deletes to visual line start
+    press_chord(&s.app, &[Key::Meta], SharedString::from(Key::Backspace));
+    assert_eq!(
+        s.state.current.borrow().editor_text(),
+        " gamma\nsecond line"
+    );
+}
+
+#[test]
+fn cocoa_ctrl_a_e_k_work_on_macos_while_preserving_cmd_a_and_ctrl_a_on_windows_linux() {
+    // macOS mode ("Cmd"): Ctrl+A (line start), Ctrl+E (line end), Ctrl+K (kill to line end)
+    let s = launched("first line\nsecond line");
+    s.app.set_shortcut_modifier("Cmd".into());
+
+    at(&s, 17); // inside "second line"
+    press_chord(&s.app, &[Key::Control], "a");
+    assert_eq!(focus(&s.state), 11, "Ctrl+A moves to line start on macOS");
+    assert_eq!(
+        s.state.current.borrow().selection().anchor,
+        11,
+        "Ctrl+A does not select all on macOS"
+    );
+
+    press_chord(&s.app, &[Key::Control], "e");
+    assert_eq!(focus(&s.state), 22, "Ctrl+E moves to line end on macOS");
+
+    // Ctrl+K kills from caret to line end, without opening Command Palette
+    at(&s, 14); // "sec|ond line"
+    press_chord(&s.app, &[Key::Control], "k");
+    assert!(
+        !s.app.get_palette_open(),
+        "Ctrl+K must not open palette on macOS"
+    );
+    assert_eq!(s.state.current.borrow().editor_text(), "first line\nsec");
+
+    // Cmd+A still selects all on macOS
+    press_chord(&s.app, &[Key::Meta], "a");
+    assert_eq!(s.state.current.borrow().selection().anchor, 0);
+    assert_eq!(focus(&s.state), 14, "Cmd+A still selects all on macOS");
+
+    // Windows/Linux mode ("Ctrl"): Ctrl+A still selects all
+    let win = launched("windows line");
+    win.app.set_shortcut_modifier("Ctrl".into());
+    at(&win, 5);
+    press_chord(&win.app, &[Key::Control], "a");
+    assert_eq!(win.state.current.borrow().selection().anchor, 0);
+    assert_eq!(focus(&win.state), 12, "Ctrl+A selects all on Windows/Linux");
+}
