@@ -22,12 +22,12 @@ export component SheetChartHeader inherits HorizontalLayout {
     }
 
     Rectangle {
-        background: Theme.active-theme == "light" ? transparent : Theme.palette().surface-raised;
+        background: !Theme.is-dark ? transparent : Theme.palette().surface-raised;
         border-radius: Theme.tokens.metrics.radius-small;
-        border-width: Theme.active-theme == "light" ? 0px : 1px;
-        border-color: Theme.active-theme == "light" ? transparent : Theme.palette().border;
+        border-width: !Theme.is-dark ? 0px : 1px;
+        border-color: !Theme.is-dark ? transparent : Theme.palette().border;
         HorizontalLayout {
-            padding: Theme.active-theme == "light" ? 0px : 2px;
+            padding: !Theme.is-dark ? 0px : 2px;
             spacing: 2px;
             LoomButton {
                 variant: "ghost";

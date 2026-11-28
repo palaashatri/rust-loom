@@ -27,6 +27,28 @@ pub(super) fn rects(app: &WriterApp) -> Vec<Rect> {
     .iter()
     .flat_map(|name| ElementHandle::find_by_element_type_name(app, name).collect::<Vec<_>>())
     .collect();
+    let mut clipped_in_flickable: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+    for f in ElementHandle::find_by_element_type_name(app, "Flickable") {
+        let (fp, fs) = (f.absolute_position(), f.size());
+        if fs.width <= 0.5 || fs.height <= 0.5 {
+            continue;
+        }
+        for role in ROLES {
+            for desc in f.query_descendants().match_accessible_role(role).find_all() {
+                let (dp, ds) = (desc.absolute_position(), desc.size());
+                let ny = dp.y.max(fp.y);
+                let nb = (dp.y + ds.height).min(fp.y + fs.height);
+                let nh = (nb - ny).max(0.0);
+                clipped_in_flickable.push((
+                    desc.accessible_label().unwrap_or_default().to_string(),
+                    dp.x,
+                    dp.y,
+                    ny,
+                    nh,
+                ));
+            }
+        }
+    }
     let mut out: Vec<Rect> = Vec::new();
     for role in ROLES {
         for element in roots.iter().flat_map(|root| {
@@ -36,13 +58,19 @@ pub(super) fn rects(app: &WriterApp) -> Vec<Rect> {
         }) {
             let (p, s) = (element.absolute_position(), element.size());
             if s.width > 0.5 && s.height > 0.5 {
-                let item = (
-                    element.accessible_label().unwrap_or_default().to_string(),
-                    p.x,
-                    p.y,
-                    s.width,
-                    s.height,
-                );
+                let label = element.accessible_label().unwrap_or_default().to_string();
+                let (y, h) = if let Some((_, _, _, ny, nh)) =
+                    clipped_in_flickable.iter().find(|(l, ox, oy, _, _)| {
+                        *l == label && (*ox - p.x).abs() < 0.5 && (*oy - p.y).abs() < 0.5
+                    }) {
+                    if *nh <= 0.5 {
+                        continue;
+                    }
+                    (*ny, *nh)
+                } else {
+                    (p.y, s.height)
+                };
+                let item = (label, p.x, y, s.width, h);
                 // The page is a scrolling surface and may extend past the window.
                 if item.0.starts_with("Document body") {
                     continue;

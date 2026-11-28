@@ -219,6 +219,7 @@ export component PresentToolbarMenu inherits Rectangle {
     in property <bool> navigator-visible: true;
     in property <bool> notes-visible: false;
     in property <int> zoom-index: 0;
+    in property <length> height-cap: 480px;
     callback toggle-navigator;
     callback toggle-notes;
     callback open-welcome-guide;
@@ -232,16 +233,21 @@ export component PresentToolbarMenu inherits Rectangle {
 
     // Keyboard: Down/Up move the highlighted row, Return or Space runs it.
     in-out property <int> selected: 0;
-    property <int> row-count: root.kind == 0 ? 7 : 3;
+    property <int> row-count: root.kind == 0 ? 15 : 3;
     property <[string]> appearance-ids: [
         "view.appearance.system", "view.appearance.light",
         "view.appearance.dark", "view.appearance.high_contrast",
+        "view.appearance.high_contrast_light",
+        "view.appearance.monokai_dark", "view.appearance.monokai_light",
+        "view.appearance.solarized_dark", "view.appearance.solarized_light",
+        "view.appearance.nord",
+        "view.appearance.catppuccin_mocha", "view.appearance.catppuccin_latte",
     ];
     function run(row: int) {
         if (root.kind == 0) {
             if (row == 0) { root.toggle-navigator(); }
             else if (row == 1) { root.toggle-notes(); }
-            else if (row == 6) { root.open-welcome-guide(); }
+            else if (row == 14) { root.open-welcome-guide(); }
             else { root.choose-appearance(root.appearance-ids[row - 2]); }
         } else {
             root.choose-zoom(row);
@@ -259,8 +265,26 @@ export component PresentToolbarMenu inherits Rectangle {
         }
     }
 
-    width: 244px + 120px * (max(1.0, Theme.text-scale) - 1.0);
-    height: menu-items.preferred-height + 2 * Theme.tokens.space.sm;
+    changed kind => {
+        root.selected = 0;
+        menu-scroll.viewport-y = 0px;
+    }
+    changed selected => {
+        if (root.row-count > 0 && menu-items.preferred-height > menu-scroll.height) {
+            let step = menu-items.preferred-height / root.row-count;
+            let row-top = root.selected * step;
+            let row-bottom = row-top + step;
+            let view-top = -menu-scroll.viewport-y;
+            if (row-top < view-top) {
+                menu-scroll.viewport-y = -row-top;
+            } else if (row-bottom > view-top + menu-scroll.height) {
+                menu-scroll.viewport-y = -(row-bottom - menu-scroll.height);
+            }
+        }
+    }
+
+    width: 280px + 120px * (max(1.0, Theme.text-scale) - 1.0);
+    height: min(menu-items.preferred-height, root.height-cap);
     border-radius: Theme.tokens.metrics.radius-medium;
     border-width: 1px;
     border-color: Theme.palette().border;
@@ -269,9 +293,26 @@ export component PresentToolbarMenu inherits Rectangle {
     drop-shadow-offset-y: 4px;
     drop-shadow-color: Theme.palette().shadow;
 
-    menu-items := VerticalLayout {
-        spacing: 2px;
-        padding: Theme.tokens.space.sm;
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        clip: true;
+
+        menu-scroll := Flickable {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            viewport-width: self.width;
+            viewport-height: menu-items.preferred-height;
+
+            menu-items := VerticalLayout {
+                width: parent.width;
+                spacing: 2px;
+                padding: Theme.tokens.space.sm;
         if root.kind == 0 : LoomMenuItem {
             label: "Navigator";
             checked: root.navigator-visible;
@@ -313,8 +354,64 @@ export component PresentToolbarMenu inherits Rectangle {
             activated => { root.choose-appearance("view.appearance.high_contrast"); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
-            label: "Welcome Guide";
+            label: "Appearance: High Contrast Light";
+            checked: Theme.appearance == "high-contrast-light";
+            checkable: true;
             selected: root.selected == 6;
+            activated => { root.choose-appearance("view.appearance.high_contrast_light"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Monokai Dark";
+            checked: Theme.appearance == "monokai-dark";
+            checkable: true;
+            selected: root.selected == 7;
+            activated => { root.choose-appearance("view.appearance.monokai_dark"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Monokai Light";
+            checked: Theme.appearance == "monokai-light";
+            checkable: true;
+            selected: root.selected == 8;
+            activated => { root.choose-appearance("view.appearance.monokai_light"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Solarized Dark";
+            checked: Theme.appearance == "solarized-dark";
+            checkable: true;
+            selected: root.selected == 9;
+            activated => { root.choose-appearance("view.appearance.solarized_dark"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Solarized Light";
+            checked: Theme.appearance == "solarized-light";
+            checkable: true;
+            selected: root.selected == 10;
+            activated => { root.choose-appearance("view.appearance.solarized_light"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Nord";
+            checked: Theme.appearance == "nord";
+            checkable: true;
+            selected: root.selected == 11;
+            activated => { root.choose-appearance("view.appearance.nord"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Catppuccin Mocha";
+            checked: Theme.appearance == "catppuccin-mocha";
+            checkable: true;
+            selected: root.selected == 12;
+            activated => { root.choose-appearance("view.appearance.catppuccin_mocha"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Appearance: Catppuccin Latte";
+            checked: Theme.appearance == "catppuccin-latte";
+            checkable: true;
+            selected: root.selected == 13;
+            activated => { root.choose-appearance("view.appearance.catppuccin_latte"); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
+            label: "Welcome Guide";
+            selected: root.selected == 14;
             activated => { root.open-welcome-guide(); root.close-requested(); }
         }
         if root.kind == 1 : LoomMenuItem {
@@ -329,11 +426,13 @@ export component PresentToolbarMenu inherits Rectangle {
             selected: root.selected == 1;
             activated => { root.choose-zoom(1); root.close-requested(); }
         }
-        if root.kind == 1 : LoomMenuItem {
-            label: "50%";
-            checked: root.zoom-index == 2;
-            selected: root.selected == 2;
-            activated => { root.choose-zoom(2); root.close-requested(); }
+                if root.kind == 1 : LoomMenuItem {
+                    label: "50%";
+                    checked: root.zoom-index == 2;
+                    selected: root.selected == 2;
+                    activated => { root.choose-zoom(2); root.close-requested(); }
+                }
+            }
         }
     }
 }

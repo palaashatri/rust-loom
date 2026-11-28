@@ -182,8 +182,8 @@ export component FormulaAssistPopup inherits Rectangle {
                 height: item-col.preferred-height;
                 border-radius: Theme.tokens.metrics.radius-small;
                 background: selected ? Theme.palette().selection-soft : transparent;
-                border-width: selected && Theme.active-theme == "high-contrast" ? 1px : 0px;
-                border-color: Theme.palette().paper-ink;
+                border-width: selected && Theme.is-high-contrast ? 1px : 0px;
+                border-color: Theme.palette().ink;
                 accessible-role: list-item;
                 accessible-label: item.signature + " — " + item.summary;
 

@@ -3,7 +3,7 @@ import { Theme } from "theme.slint";
 /// Colours of document artwork (a chart). They stay on the paper palette in
 /// every UI theme: dark chrome around white cells must not turn a chart dark.
 export global Doc {
-    out property <bool> hc: Theme.active-theme == "high-contrast";
+    out property <bool> hc: Theme.is-high-contrast;
     out property <color> line: hc ? #000000 : #b8b8c0;
     out property <color> muted: hc ? #000000 : #55555b;
     out property <color> well: hc ? #ffffff : #f2f2f4;

@@ -1429,7 +1429,7 @@ fn compute_render_projection(
     doc: &WriterDocument,
     viewport: PageViewport,
 ) -> ComputedProjection {
-    let hc = Theme::get(app).get_active_theme() == "high-contrast";
+    let hc = Theme::get(app).get_is_high_contrast();
     ComputedProjection {
         projection: projection::project_with_viewport_scale_and_theme(
             doc,

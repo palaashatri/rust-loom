@@ -61,11 +61,11 @@ export component SheetScrollBar inherits Rectangle {
         border-radius: Theme.tokens.metrics.radius-small;
         // The handle must read against both the track and the cells beside it:
         // ink-secondary clears 3:1 on both; high contrast adds a dark edge.
-        border-width: Theme.active-theme == "high-contrast" ? 2px : 0px;
+        border-width: Theme.is-high-contrast ? 2px : 0px;
         border-color: #000000;
         background: scroll-track.pressed || scroll-track.has-hover
             ? Theme.palette().accent
-            : Theme.active-theme == "high-contrast" ? Theme.palette().accent
+            : Theme.is-high-contrast ? Theme.palette().accent
             : Theme.palette().ink-secondary;
     }
 

@@ -39,13 +39,13 @@ component FormatPill inherits Rectangle {
     width: max(44px, lbl.preferred-width + 14px);
     height: 21px;
     border-radius: 10.5px;
-    background: Theme.active-theme == "high-contrast" ? #ffffff : root.fill-color;
+    background: Theme.is-high-contrast ? Theme.palette().surface-raised : root.fill-color;
     border-width: 1px;
-    border-color: Theme.active-theme == "high-contrast" ? #000000 : root.stroke-color;
+    border-color: Theme.is-high-contrast ? Theme.palette().border-strong : root.stroke-color;
 
     lbl := Text {
         text: root.label; font-family: Theme.ui-font-family; font-size: 10px; font-weight: 700;
-        color: Theme.active-theme == "high-contrast" ? #000000 : root.text-color;
+        color: Theme.is-high-contrast ? Theme.palette().ink : root.text-color;
         horizontal-alignment: center; vertical-alignment: center;
     }
 }

@@ -673,6 +673,7 @@ export component PresentApp inherits Window {
                 ? max(8px, min(root.menu-x - self.width, root.width - self.width - 8px))
                 : max(0px, min(root.menu-x, root.width - self.width - 8px));
             y: root.menu-top;
+            height-cap: max(140px, root.height - root.menu-top - 16px);
             navigator-visible: root.show-navigator;
             notes-visible: root.show-notes-drawer;
             zoom-index: root.zoom-index;

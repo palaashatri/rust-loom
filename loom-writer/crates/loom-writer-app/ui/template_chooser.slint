@@ -364,7 +364,7 @@ export component TemplateChooserModal inherits Rectangle {
                                 x: Theme.rtl ? Theme.tokens.space.xxl : parent.width - Theme.tokens.space.xxl - self.width;
                                 y: (parent.height - self.height) / 2;
                                 border-radius: self.height / 2; background: Theme.palette().selection-soft;
-                                border-width: 1px; border-color: Theme.active-theme == "high-contrast" ? Theme.palette().accent : Theme.palette().border;
+                                border-width: 1px; border-color: Theme.is-high-contrast ? Theme.palette().accent : Theme.palette().border;
                                 pill-row := HorizontalLayout {
                                     padding-left: Theme.tokens.space.md; padding-right: Theme.tokens.space.md;
                                     spacing: Theme.tokens.space.sm; cross-axis-alignment: center;

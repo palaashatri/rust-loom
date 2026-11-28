@@ -31,19 +31,19 @@ export component SheetSelectionOverlay inherits Rectangle {
     callback fill-selection;
     // High contrast draws the selection yellow, about 1.3:1 on the white grid;
     // there the outline is the paper ink, which is 21:1 on that grid.
-    property <color> outline-color: Theme.active-theme == "high-contrast"
+    property <color> outline-color: Theme.is-high-contrast
         ? Theme.palette().paper-ink : Theme.palette().accent;
 
     x: 0px;
     y: 0px;
     background: transparent;
-    border-width: root.active && Theme.active-theme != "high-contrast" ? 2px : 0px;
+    border-width: root.active && !Theme.is-high-contrast ? 2px : 0px;
     border-color: root.outline-color;
 
     // High contrast draws a 3px active ring: a paper hairline on the outside,
     // which contrasts with the black gridline beside the cell, and a 2px ink ring
     // inside it.
-    if root.active && Theme.active-theme == "high-contrast" : Rectangle {
+    if root.active && Theme.is-high-contrast : Rectangle {
         x: 0px;
         y: 0px;
         width: parent.width;
@@ -252,7 +252,7 @@ export component SheetTable inherits Rectangle {
                             // behind black paper text makes header and
                             // selected cells disappear. Keep those cells on
                             // the white paper token in that theme.
-                            property <color> readable-line: Theme.active-theme == "high-contrast"
+                            property <color> readable-line: Theme.is-high-contrast
                                 ? Theme.palette().paper
                                 : Theme.palette().paper-line;
                             clip: true;
@@ -273,7 +273,7 @@ export component SheetTable inherits Rectangle {
                                     : fill-idx == 4 ? #BFDBFE
                                     : fill-idx == 5 ? #DDD6FE
                                     : fill-idx == 6 ? #E5E7EB
-                                    : in-selection && !is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : readable-line)
+                                    : in-selection && !is-active ? (!Theme.is-dark ? Theme.palette().selection-soft : readable-line)
                                     : Theme.palette().paper;
                                 border-width: 1px;
                                 border-color: Theme.palette().paper-line;
@@ -341,7 +341,7 @@ export component SheetTable inherits Rectangle {
                                 height: parent.height;
                                 background: Theme.palette().paper;
                                 border-width: 2px;
-                                border-color: Theme.active-theme == "high-contrast"
+                                border-color: Theme.is-high-contrast
                                     ? Theme.palette().paper-ink : Theme.palette().selection;
                                 Text {
                                     x: 8px;

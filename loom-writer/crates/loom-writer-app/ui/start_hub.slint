@@ -122,7 +122,7 @@ component DocPageBadge inherits Rectangle {
 
     width: 30px; height: 38px; border-radius: 4px;
     background: Theme.palette().paper;
-    border-width: 1px; border-color: Theme.active-theme == "high-contrast" ? #000000 : Theme.palette().border-strong;
+    border-width: 1px; border-color: Theme.is-high-contrast ? Theme.palette().paper-ink : Theme.palette().border-strong;
     drop-shadow-blur: 4px; drop-shadow-offset-y: 1px; drop-shadow-color: Theme.palette().shadow; clip: true;
 
     Rectangle {

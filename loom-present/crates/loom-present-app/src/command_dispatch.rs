@@ -281,6 +281,7 @@ pub(crate) fn wire_shortcuts(app: &PresentApp) {
 /// Return true when `id` is a supported Present menu command.
 pub(crate) fn is_present_menu_command(id: &str) -> bool {
     slide_order::is_command(id)
+        || loom_desktop::Appearance::from_command_id(id).is_some()
         || matches!(
             id,
             "file.new"
@@ -342,10 +343,6 @@ pub(crate) fn is_present_menu_command(id: &str) -> bool {
                 | "view.zoom_in"
                 | "view.zoom_out"
                 | "view.zoom_reset"
-                | "view.appearance.system"
-                | "view.appearance.light"
-                | "view.appearance.dark"
-                | "view.appearance.high_contrast"
                 | "view.window-frame.system"
                 | "view.window-frame.loom"
                 | "help.welcome_guide"

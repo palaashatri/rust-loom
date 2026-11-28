@@ -187,8 +187,8 @@ export component SheetObjectLayer inherits Rectangle {
         width: max(80px, root.objects[idx].width * 1px);
         height: max(48px, root.objects[idx].height * 1px);
         visible: root.objects[idx].visible;
-        border-width: is-selected ? (Theme.active-theme == "high-contrast" ? 4px : 2px) : 1px;
-        border-color: Theme.active-theme == "high-contrast"
+        border-width: is-selected ? (Theme.is-high-contrast ? 4px : 2px) : 1px;
+        border-color: Theme.is-high-contrast
             ? Theme.palette().paper-ink
             : is-selected ? Theme.palette().accent : Theme.palette().border-strong;
         border-radius: Theme.tokens.metrics.radius-medium;
@@ -316,7 +316,7 @@ export component SheetObjectLayer inherits Rectangle {
                 height: 8px;
                 border-radius: 4px;
                 border-width: 2px;
-                border-color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().accent;
+                border-color: Theme.is-high-contrast ? Theme.palette().paper-ink : Theme.palette().accent;
                 background: Theme.palette().paper;
             }
 
@@ -356,7 +356,7 @@ export component SheetObjectLayer inherits Rectangle {
             height: parent.height + 8px;
             background: transparent;
             border-width: 2px;
-            border-color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().accent;
+            border-color: Theme.is-high-contrast ? Theme.palette().paper-ink : Theme.palette().accent;
             border-radius: Theme.tokens.metrics.radius-medium + 2px;
         }
         }
