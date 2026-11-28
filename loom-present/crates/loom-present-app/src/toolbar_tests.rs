@@ -352,6 +352,106 @@ fn view_menu_commands_toggle_panes_and_checkmarks_follow_every_control() {
 
     assert!(local_menu::SUPPORTED_COMMANDS.contains(&"view.navigator"));
     assert!(local_menu::SUPPORTED_COMMANDS.contains(&"view.notes"));
+    assert!(local_menu::SUPPORTED_COMMANDS.contains(&"view.slide_sorter"));
+    assert!(command_dispatch::is_present_menu_command(
+        "view.slide_sorter"
+    ));
+
+    assert!(!checked("view.slide_sorter"));
+    assert!(!app.global::<ElementInk>().get_slide_sorter_open());
+    assert!(dispatch_command(&app, "view.slide_sorter"));
+    render(&app);
+    assert!(app.global::<ElementInk>().get_slide_sorter_open());
+    assert!(checked("view.slide_sorter"));
+    button(&app, "View menu");
+    press(&app, AccessibleRole::ListItem, "Slide Sorter");
+    render(&app);
+    assert!(!app.global::<ElementInk>().get_slide_sorter_open());
+    assert!(!checked("view.slide_sorter"));
+
+    // Command Palette reaches Slide Sorter under both "Slide Sorter" and "Light Table".
+    for query in ["Slide Sorter", "Light Table"] {
+        app.set_palette_query(query.into());
+        app.invoke_palette_query_changed(query.into());
+        let rows = app.get_palette_commands();
+        assert!(
+            rows.row_count() > 0
+                && rows
+                    .row_data(0)
+                    .map(|r| r.label.contains("Slide Sorter"))
+                    .unwrap_or(false),
+            "palette query {query:?} must match Slide Sorter"
+        );
+    }
+    app.invoke_palette_invoked(0);
+    render(&app);
+    assert!(app.global::<ElementInk>().get_slide_sorter_open());
+    app.invoke_palette_invoked(0);
+    render(&app);
+    assert!(!app.global::<ElementInk>().get_slide_sorter_open());
+}
+
+#[test]
+fn format_bold_italic_underline_strikethrough_do_not_overlap() {
+    let (app, _state) = launched(None);
+    app.invoke_add_text();
+    app.invoke_show_inspector_tab(0);
+    render(&app);
+    let mut rects = Vec::new();
+    for label in [
+        "Bold, off",
+        "Italic, off",
+        "Underline, off",
+        "Strikethrough, off",
+    ] {
+        let el = ElementHandle::find_by_accessible_label(&app, label)
+            .next()
+            .unwrap_or_else(|| panic!("B/I/U/S button {label:?} should be present"));
+        let pos = el.absolute_position();
+        let size = el.size();
+        assert!(
+            size.width >= 24.0 && size.height >= 24.0,
+            "button {label:?} collapsed: {size:?}"
+        );
+        rects.push((pos.x, size.width));
+    }
+    rects.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    for pair in rects.windows(2) {
+        assert!(
+            pair[1].0 >= pair[0].0 + pair[0].1 - 0.5,
+            "B/I/U/S buttons must not overlap: {rects:?}"
+        );
+    }
+}
+
+#[test]
+fn start_hub_header_buttons_fit_above_divider() {
+    let (app, _state) = launched(None);
+    app.global::<StartHubState>().set_open(true);
+    render(&app);
+    // In the 1280x800 window, the 640px-tall Start Hub card spans y = 80..720
+    // and its 68px header band spans y = 80..148 above the 1px divider.
+    for label in [
+        "Open Presentation File",
+        "New Presentation from Template Chooser",
+        "Close Start Hub",
+    ] {
+        let btn = ElementHandle::find_by_accessible_label(&app, label)
+            .next()
+            .unwrap_or_else(|| panic!("{label} button should be present"));
+        let pos = btn.absolute_position();
+        let size = btn.size();
+        assert!(
+            size.height > 20.0 && size.height <= 40.0,
+            "{label} height out of bounds: {size:?}"
+        );
+        assert!(
+            pos.y >= 80.0 && pos.y + size.height <= 148.0,
+            "{label} overlaps header divider: y={}..{} (band 80..148)",
+            pos.y,
+            pos.y + size.height
+        );
+    }
 }
 
 #[test]

@@ -505,6 +505,7 @@ pub(crate) fn wire_p1_controls(app: &PresentApp, state: &Rc<GuiState>) {
             if let Some(app) = app_ref.upgrade() {
                 let ink = app.global::<ElementInk>();
                 ink.set_slide_sorter_open(!ink.get_slide_sorter_open());
+                app.invoke_view_state_changed();
                 refresh(&app, &state);
             }
         });

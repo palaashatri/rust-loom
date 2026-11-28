@@ -23,6 +23,7 @@ export component PresentDocumentSection inherits VerticalLayout {
         width: parent.width;
         label: "Background";
         accessible-name: "Slide Background";
+        preview-kind: "background";
         current-color: ElementInk.bg-color-swatch;
         is-automatic: ElementInk.bg-color-automatic;
         is-mixed: ElementInk.bg-color-mixed;
@@ -54,12 +55,5 @@ export component PresentDocumentSection inherits VerticalLayout {
         label: "Slide Aspect Ratio";
         current: ElementInk.aspect-ratio == "4:3" ? 1 : 0;
         selected(idx) => { ElementInk.aspect-requested(idx == 1 ? "4:3" : "16:9"); }
-    }
-
-    if ElementInk.deck-stats != "" : Text {
-        text: ElementInk.deck-stats;
-        font-size: Theme.type.caption;
-        color: Theme.palette().ink-secondary;
-        wrap: word-wrap;
     }
 }

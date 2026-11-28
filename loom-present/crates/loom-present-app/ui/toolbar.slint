@@ -1,5 +1,6 @@
 import { LabeledToolbar, ToolbarSpacer } from "components.slint";
 import { LoomMenuItem, LoomToolbarItem, LoomOverflowTrigger } from "foundation.slint";
+import { ElementInk } from "object_part.slint";
 import { Theme } from "theme.slint";
 
 /// One icon-over-label row in three groups: View/Zoom/Add Slide on the
@@ -232,7 +233,7 @@ export component PresentToolbarMenu inherits Rectangle {
 
     // Keyboard: Down/Up move the highlighted row, Return or Space runs it.
     in-out property <int> selected: 0;
-    property <int> row-count: root.kind == 0 ? 7 : 3;
+    property <int> row-count: root.kind == 0 ? 8 : 3;
     property <[string]> appearance-ids: [
         "view.appearance.system", "view.appearance.light",
         "view.appearance.dark", "view.appearance.high_contrast",
@@ -241,8 +242,9 @@ export component PresentToolbarMenu inherits Rectangle {
         if (root.kind == 0) {
             if (row == 0) { root.toggle-navigator(); }
             else if (row == 1) { root.toggle-notes(); }
-            else if (row == 6) { root.open-welcome-guide(); }
-            else { root.choose-appearance(root.appearance-ids[row - 2]); }
+            else if (row == 2) { ElementInk.toggle-slide-sorter(); }
+            else if (row == 7) { root.open-welcome-guide(); }
+            else { root.choose-appearance(root.appearance-ids[row - 3]); }
         } else {
             root.choose-zoom(row);
         }
@@ -285,36 +287,42 @@ export component PresentToolbarMenu inherits Rectangle {
             activated => { root.toggle-notes(); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
+            label: "Slide Sorter";
+            checked: ElementInk.slide-sorter-open;
+            selected: root.selected == 2;
+            activated => { ElementInk.toggle-slide-sorter(); root.close-requested(); }
+        }
+        if root.kind == 0 : LoomMenuItem {
             label: "Appearance: System";
             checked: Theme.appearance == "system";
             checkable: true;
-            selected: root.selected == 2;
+            selected: root.selected == 3;
             activated => { root.choose-appearance("view.appearance.system"); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
             label: "Appearance: Light";
             checked: Theme.appearance == "light";
             checkable: true;
-            selected: root.selected == 3;
+            selected: root.selected == 4;
             activated => { root.choose-appearance("view.appearance.light"); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
             label: "Appearance: Dark";
             checked: Theme.appearance == "dark";
             checkable: true;
-            selected: root.selected == 4;
+            selected: root.selected == 5;
             activated => { root.choose-appearance("view.appearance.dark"); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
             label: "Appearance: High Contrast";
             checked: Theme.appearance == "high-contrast";
             checkable: true;
-            selected: root.selected == 5;
+            selected: root.selected == 6;
             activated => { root.choose-appearance("view.appearance.high_contrast"); root.close-requested(); }
         }
         if root.kind == 0 : LoomMenuItem {
             label: "Welcome Guide";
-            selected: root.selected == 6;
+            selected: root.selected == 7;
             activated => { root.open-welcome-guide(); root.close-requested(); }
         }
         if root.kind == 1 : LoomMenuItem {

@@ -149,22 +149,24 @@ export component PresentFormatSection inherits VerticalLayout {
     // B / I / U / S toggles with mixed-value markers
     Rectangle {
         x: Theme.rtl ? parent.width - self.width : 0px;
-        width: self.preferred-width;
-        height: self.preferred-height;
+        width: style-toggles.preferred-width;
+        height: style-toggles.preferred-height;
         border-radius: Theme.tokens.metrics.radius-medium;
         background: Theme.palette().surface-sunken;
         border-width: 1px;
         border-color: Theme.palette().border;
 
-        HorizontalLayout {
+        style-toggles := HorizontalLayout {
             padding: 2px;
             spacing: 2px;
             alignment: Theme.rtl ? end : start;
             for slot in 4 : Rectangle {
                 property <int> k: Theme.rtl ? 3 - slot : slot;
-                width: btn.preferred-width;
-                height: btn.preferred-height;
+                width: Theme.scaled-control-height;
+                height: Theme.scaled-control-height;
                 btn := LoomIconButton {
+                    width: parent.width;
+                    height: parent.height;
                     icon: parent.k == 0 ? "bold" : parent.k == 1 ? "italic" : parent.k == 2 ? "underline" : "strikethrough";
                     selected: parent.k == 0 ? (ElementInk.bold && !ElementInk.bold-mixed)
                         : parent.k == 1 ? (ElementInk.italic && !ElementInk.italic-mixed)
@@ -246,6 +248,7 @@ export component PresentFormatSection inherits VerticalLayout {
         width: parent.width;
         label: "Shape Fill";
         accessible-name: "Shape Fill";
+        preview-kind: "fill";
         current-color: ElementInk.fill-color-swatch;
         is-automatic: ElementInk.fill-color-automatic;
         is-mixed: ElementInk.fill-color-mixed;

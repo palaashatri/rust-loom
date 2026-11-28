@@ -12,6 +12,7 @@ use crate::{sync_menu_state, GuiState, PresentApp};
 
 pub(crate) const NAVIGATOR: &str = "view.navigator";
 pub(crate) const NOTES: &str = "view.notes";
+pub(crate) const SLIDE_SORTER: &str = "view.slide_sorter";
 
 /// Handles the two pane commands; false for any other id.
 pub(crate) fn dispatch(app: &PresentApp, id: &str) -> bool {
@@ -28,6 +29,10 @@ pub(crate) fn project(projection: &mut CommandStateProjection, app: &PresentApp)
     for (id, checked) in [
         (NAVIGATOR, app.get_show_navigator()),
         (NOTES, app.get_show_notes_drawer()),
+        (
+            SLIDE_SORTER,
+            app.global::<crate::ElementInk>().get_slide_sorter_open(),
+        ),
     ] {
         if let Some(mut item) = projection.get(id).cloned() {
             item.checked = Some(checked);

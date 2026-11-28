@@ -54,6 +54,7 @@ pub enum PaletteAction {
     ZoomIn,
     ZoomOut,
     ZoomReset,
+    SlideSorter,
     InsertRoundedRect,
     InsertArrow,
     InsertLine,
@@ -230,6 +231,12 @@ pub fn master_palette(app: &PresentApp) -> Vec<PaletteCommand> {
             id: "present.zoom-reset",
             label: "Reset Zoom",
             shortcut: crate::command_dispatch::shortcut_for_id("view.zoom_reset"),
+        },
+        PaletteCommand {
+            action: PaletteAction::SlideSorter,
+            id: "present.slide-sorter",
+            label: "Slide Sorter (Light Table)",
+            shortcut: crate::command_dispatch::shortcut_for_id("view.slide_sorter"),
         },
         PaletteCommand {
             action: PaletteAction::InsertRoundedRect,
@@ -580,6 +587,12 @@ pub fn wire_palette(app: &PresentApp) {
                         PaletteAction::ZoomReset => {
                             let _ =
                                 crate::command_dispatch::dispatch_command(&app, "view.zoom_reset");
+                        }
+                        PaletteAction::SlideSorter => {
+                            let _ = crate::command_dispatch::dispatch_command(
+                                &app,
+                                "view.slide_sorter",
+                            );
                         }
                         PaletteAction::InsertRoundedRect => {
                             app.invoke_add_shape_kind("rounded-rect".into());

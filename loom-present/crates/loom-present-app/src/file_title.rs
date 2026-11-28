@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use slint::ComponentHandle;
+
 /// The saved file's stem, or the deck's own title while it has never been
 /// saved. The deck's internal title is never changed.
 pub(crate) fn display_title(save_path: Option<&Path>, deck_title: &str) -> String {
@@ -22,13 +24,19 @@ pub(crate) fn window_title(name: &str, dirty: bool) -> String {
     }
 }
 
+pub(crate) fn sync_macos_window(app: &crate::PresentApp, dirty: bool, save_path: Option<&Path>) {
+    let handle = app.window().window_handle();
+    loom_desktop::macos_window::set_document_edited(&handle, dirty);
+    loom_desktop::macos_window::set_represented_path(&handle, save_path);
+}
+
 pub(crate) fn sync(app: &crate::PresentApp, state: &crate::GuiState) {
-    let title = display_title(
-        state.save_path.borrow().as_deref(),
-        &state.session.borrow().document.title,
-    );
-    app.set_os_window_title(window_title(&title, crate::deck_is_dirty(state)).into());
+    let save_path = state.save_path.borrow();
+    let title = display_title(save_path.as_deref(), &state.session.borrow().document.title);
+    let dirty = crate::deck_is_dirty(state);
+    app.set_os_window_title(window_title(&title, dirty).into());
     app.set_deck_title(title.into());
+    sync_macos_window(app, dirty, save_path.as_deref());
 }
 
 #[cfg(test)]
