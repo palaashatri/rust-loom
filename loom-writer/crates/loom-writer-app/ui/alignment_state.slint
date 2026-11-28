@@ -59,6 +59,7 @@ export global WriterFormatState {
     callback hyperlink-remove();
     callback hyperlink-cancel();
     callback insert-toc();
+    callback cocoa-key(string, bool, bool, bool, bool) -> bool;
     in-out property <bool> show-ruler: false;
     in-out property <length> page-width-px: 612px;
     in-out property <length> margin-left-px: 72px;

@@ -434,8 +434,9 @@ fn new_modals_stay_in_bounds_and_readable_across_scales_and_rtl() {
 
 #[test]
 fn cmd_and_ctrl_select_all_selects_without_typing_and_bolds() {
-    for modifier in [Key::Control, Key::Meta] {
+    for (mode, modifier) in [("Ctrl", Key::Control), ("Cmd", Key::Meta)] {
         let (app, state) = setup_app(text_document("Hello Select All"));
+        app.set_shortcut_modifier(mode.into());
         app.invoke_focus_page();
         app.invoke_selection_changed(16, 16);
 

@@ -179,7 +179,7 @@ export component WriterFontList inherits Rectangle {
     property <length> row-height: max(24px, Theme.scaled-control-height);
     property <length> content-height: FontPicker.lines.length * root.row-height;
     property <length> list-height: FontPicker.lines.length > 0
-        ? min(260px, max(root.row-height, root.content-height))
+        ? min(220px, max(root.row-height, root.content-height))
         : 0px;
     property <length> max-scroll: max(0px, root.content-height - root.list-height);
     property <int> page-rows: max(1, Math.floor(root.list-height / root.row-height) - 1);

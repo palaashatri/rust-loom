@@ -484,15 +484,17 @@ export component WriterApp inherits Window {
                         pointer-released(x, y) => { root.pointer-released(x, y); }
                         pointer-cancelled => { root.pointer-cancelled(); }
                         key-pressed(event) => {
-                            let m = event.modifiers.control || event.modifiers.meta;
-                            let plain = m && !event.modifiers.shift && !event.modifiers.alt;
+                            let md = event.modifiers;
+                            let m = md.control || md.meta;
+                            let plain = m && !md.shift && !md.alt;
                             let t = event.text;
-                            let to-start = (event.modifiers.control && t == Key.Home) || (event.modifiers.meta && (t == Key.Home || t == Key.UpArrow));
-                            let to-end = (event.modifiers.control && t == Key.End) || (event.modifiers.meta && (t == Key.End || t == Key.DownArrow));
-                            if (to-start || to-end) { root.move-document-edge(to-end, event.modifiers.shift); return accept; }
-                            if (root.handle-table-key(t, event.modifiers.shift, m, event.modifiers.alt)) { return accept; }
-                            if (m && !event.modifiers.alt && (t == "z" || t == "Z" || (!event.modifiers.shift && (t == "y" || t == "Y")))) {
-                                if (t == "y" || t == "Y" || event.modifiers.shift) { root.redo(); } else { root.undo(); }
+                            let to-start = (md.control && t == Key.Home) || (md.meta && (t == Key.Home || t == Key.UpArrow));
+                            let to-end = (md.control && t == Key.End) || (md.meta && (t == Key.End || t == Key.DownArrow));
+                            if (to-start || to-end) { root.move-document-edge(to-end, md.shift); return accept; }
+                            if (root.handle-table-key(t, md.shift, m, md.alt)) { return accept; }
+                            if (WriterFormatState.cocoa-key(t, md.shift, md.control, md.alt, md.meta)) { return accept; }
+                            if (m && !md.alt && (t == "z" || t == "Z" || (!md.shift && (t == "y" || t == "Y")))) {
+                                if (t == "y" || t == "Y" || md.shift) { root.redo(); } else { root.undo(); }
                                 return accept;
                             }
                             if (plain && (t == "a" || t == "A")) { page-canvas.select-all(); return accept; }
@@ -501,13 +503,13 @@ export component WriterApp inherits Window {
                             if (plain && (t == "v" || t == "V")) { root.paste(); return accept; }
                             if (m && app-focus.dispatch-shortcut-chord(event)) { return accept; }
                             if (root.open-menu-for-key(event)) { return accept; }
-                            if (t == Key.F6) { root.leave-page(event.modifiers.shift); return accept; }
+                            if (t == Key.F6) { root.leave-page(md.shift); return accept; }
                             if (t == Key.Tab) {
-                                if (event.modifiers.shift) { root.table-navigate-backwards(); } else { root.insert-tab(); }
+                                if (md.shift) { root.table-navigate-backwards(); } else { root.insert-tab(); }
                                 return accept;
                             }
-                            if (t == Key.PageDown) { root.page-move(1, event.modifiers.shift); return accept; }
-                            if (t == Key.PageUp) { root.page-move(-1, event.modifiers.shift); return accept; }
+                            if (t == Key.PageDown) { root.page-move(1, md.shift); return accept; }
+                            if (t == Key.PageUp) { root.page-move(-1, md.shift); return accept; }
                             return reject;
                         }
                     }
