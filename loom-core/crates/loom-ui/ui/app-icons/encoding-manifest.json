@@ -84,20 +84,20 @@
     ],
     "files": {
       "loom-present.png": {
-        "bytes": 777988,
-        "sha256": "9ec85acfc06399fe06963d48b76c82baaec600edae729b70039142dd06fc6348"
+        "bytes": 796232,
+        "sha256": "0df57f0c8a5cf2644f56d83b8713d274e233bcd756dde7c2feb1722a5ca20f6c"
       },
       "loom-present.ico": {
-        "bytes": 86236,
-        "sha256": "cb6d8c6fd4b4ccf1f0c959b7edf4909fa301f325fa0ca3824f0e08d56a0b9d90"
+        "bytes": 87096,
+        "sha256": "d33502a85538bd711e0680b0720a8375efadc1520ac6193d9485d18d3257a828"
       },
       "loom-present.icns": {
-        "bytes": 1609748,
-        "sha256": "daf9d24503b5acb86b1ac82574865d7682a9fdc32c1435c9e5d7c042979e9355"
+        "bytes": 1619149,
+        "sha256": "bdfc64a71467dfc47e9903ac225df022461f33c10820bcd8f4dd705e68461ead"
       },
       "loom-present.512.png": {
-        "bytes": 202160,
-        "sha256": "58bf950f1897d8d1a70c48c366e98f3c1794a5189883ea93aa5dc79c7cdb264e"
+        "bytes": 205002,
+        "sha256": "338be1003885c1e6cf4fabd509246af9049cb963224377cd1d9620864aca199a"
       }
     }
   }
