@@ -36,6 +36,8 @@ export component PresenterWindow inherits Window {
     in property <bool> has-previous: false;
     in property <ThumbRows> current-rows;
     in property <ThumbRows> next-rows;
+    in property <bool> has-dynamic-bg: false;
+    in property <image> dynamic-bg-image;
     // Set from the window height after layout, so it cannot feed back into it.
     property <bool> roomy: false;
     changed height => { root.roomy = self.height >= 560px; }
@@ -171,6 +173,8 @@ export component PresenterWindow inherits Window {
                                 width: parent.width;
                                 rows: root.current-rows;
                                 description: "Current slide: " + root.slide-title;
+                                live-dynamic-bg: root.has-dynamic-bg;
+                                live-dynamic-bg-image: root.dynamic-bg-image;
                             }
                             for dot in root.stroke-dots : Rectangle {
                                 x: dot.x * parent.width - dot.size / 2;

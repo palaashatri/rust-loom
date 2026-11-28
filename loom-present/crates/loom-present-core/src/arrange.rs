@@ -423,18 +423,54 @@ impl PresentationSession {
         new_ids
     }
 
-    /// Sets the active slide's background color (1 undo step).
+    /// Sets the active slide's solid background color and clears any dynamic background (1 undo step).
     pub fn set_slide_background(&mut self, color: impl Into<String>) -> bool {
         let color = color.into();
         let Some(slide) = self.document.slides.get(self.document.active_index) else {
             return false;
         };
-        if slide.bg_color == color {
+        if slide.bg_color == color && slide.dynamic_bg.is_none() {
             return false;
         }
         self.checkpoint();
         if let Some(slide) = self.document.slides.get_mut(self.document.active_index) {
             slide.bg_color = color;
+            slide.dynamic_bg = None;
+        }
+        true
+    }
+
+    /// Sets or clears the active slide's dynamic background (1 undo step).
+    pub fn set_slide_dynamic_bg(&mut self, bg: Option<crate::DynamicBackground>) -> bool {
+        let Some(slide) = self.document.slides.get(self.document.active_index) else {
+            return false;
+        };
+        if slide.dynamic_bg == bg {
+            return false;
+        }
+        self.checkpoint();
+        if let Some(slide) = self.document.slides.get_mut(self.document.active_index) {
+            if let Some(ref dynamic) = bg {
+                slide.bg_color = dynamic.static_fallback_hex();
+            }
+            slide.dynamic_bg = bg;
+        }
+        true
+    }
+
+    /// Applies `bg` (or clears it when `None`) to every slide in the deck (1 undo step).
+    pub fn apply_dynamic_bg_to_all_slides(&mut self, bg: Option<crate::DynamicBackground>) -> bool {
+        if self.document.slides.is_empty()
+            || self.document.slides.iter().all(|s| s.dynamic_bg == bg)
+        {
+            return false;
+        }
+        self.checkpoint();
+        for slide in &mut self.document.slides {
+            if let Some(ref dynamic) = bg {
+                slide.bg_color = dynamic.static_fallback_hex();
+            }
+            slide.dynamic_bg = bg.clone();
         }
         true
     }

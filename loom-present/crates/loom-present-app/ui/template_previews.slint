@@ -9,11 +9,32 @@ export component SlideTemplatePreview inherits Rectangle {
     border-color: root.selected ? Theme.palette().accent : Theme.palette().border-strong;
     clip: true;
 
-    pure function is-dark() -> bool {
-        root.template-id == "executive-pitch" || root.template-id == "product-launch"
+    pure function is-dynamic() -> bool {
+        root.template-id == "dynamic-aurora"
+            || root.template-id == "dynamic-solar"
+            || root.template-id == "dynamic-oceanic"
+            || root.template-id == "dynamic-prism"
+            || root.template-id == "dynamic-obsidian"
+            || root.template-id == "dynamic-botanical"
     }
 
-    pure function bg-color() -> color {
+    pure function is-dark() -> bool {
+        root.template-id == "executive-pitch"
+            || root.template-id == "product-launch"
+            || root.template-id == "dynamic-aurora"
+            || root.template-id == "dynamic-solar"
+            || root.template-id == "dynamic-oceanic"
+            || root.template-id == "dynamic-obsidian"
+            || root.template-id == "dynamic-botanical"
+    }
+
+    pure function bg-brush() -> brush {
+        if root.template-id == "dynamic-aurora" { return @linear-gradient(135deg, #0b1226 0%, #124e5b 48%, #3d2c6e 100%); }
+        if root.template-id == "dynamic-solar" { return @linear-gradient(125deg, #26110b 0%, #9a3412 46%, #d97706 100%); }
+        if root.template-id == "dynamic-oceanic" { return @linear-gradient(140deg, #061a2b 0%, #0e4f6e 50%, #0d9488 100%); }
+        if root.template-id == "dynamic-prism" { return @linear-gradient(130deg, #f3f0ff 0%, #bae6fd 50%, #fbcfe8 100%); }
+        if root.template-id == "dynamic-obsidian" { return @linear-gradient(135deg, #09090b 0%, #312e81 55%, #7e22ce 100%); }
+        if root.template-id == "dynamic-botanical" { return @linear-gradient(130deg, #0a1f18 0%, #14532d 50%, #10b981 100%); }
         if root.template-id == "executive-pitch" { return #0f172a; }
         if root.template-id == "product-launch" { return #18181b; }
         if root.template-id == "data-report" { return #f8fafc; }
@@ -31,10 +52,36 @@ export component SlideTemplatePreview inherits Rectangle {
         if root.template-id == "academic-lecture" { return #15803d; }
         if root.template-id == "workshop-deck" { return #4f46e5; }
         if root.template-id == "minimal-stage" { return #18181b; }
+        if root.template-id == "dynamic-aurora" { return #38bdf8; }
+        if root.template-id == "dynamic-solar" { return #fbbf24; }
+        if root.template-id == "dynamic-oceanic" { return #2dd4bf; }
+        if root.template-id == "dynamic-prism" { return #7c3aed; }
+        if root.template-id == "dynamic-obsidian" { return #ec4899; }
+        if root.template-id == "dynamic-botanical" { return #4ade80; }
         return #2b579a;
     }
 
-    background: root.bg-color();
+    background: root.bg-brush();
+
+    // Flowing procedural glow layers for Dynamic templates
+    if root.is-dynamic() : Rectangle {
+        x: parent.width * 0.42;
+        y: -parent.height * 0.22;
+        width: parent.width * 0.72;
+        height: parent.height * 0.85;
+        border-radius: self.height / 2;
+        background: root.accent-color();
+        opacity: 0.28;
+    }
+    if root.is-dynamic() : Rectangle {
+        x: -parent.width * 0.14;
+        y: parent.height * 0.48;
+        width: parent.width * 0.62;
+        height: parent.height * 0.72;
+        border-radius: self.height / 2;
+        background: root.is-dark() ? #ffffff : root.accent-color();
+        opacity: 0.16;
+    }
 
     // Top accent bar for most themes
     if root.template-id != "blank" : Rectangle {

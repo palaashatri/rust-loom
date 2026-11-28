@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use loom_pdf::{
-    text_width_pt, FallbackFont, FontFallback, PageIndex, PathStyle, PdfDocument, TextStyle,
+    text_width_pt, FallbackFont, FontFallback, PageIndex, PathStyle, PdfDocument, PdfImage,
+    TextStyle,
 };
 
 use crate::{
@@ -114,6 +115,39 @@ impl FontFallback for CatalogFontFallback {
     }
 }
 
+/// Paints the static `phase = 0.0` dynamic background raster behind slide elements.
+fn draw_dynamic_bg_pdf(
+    pdf: &mut PdfDocument,
+    page: PageIndex,
+    bg: &crate::DynamicBackground,
+    rect: (f32, f32, f32, f32),
+    pdf_images: &mut BTreeMap<String, usize>,
+) {
+    let (rx, ry, rw, rh) = rect;
+    let key = format!("__dynamic_bg__:{}", bg.cache_key());
+    let index = match pdf_images.get(&key) {
+        Some(&idx) => Some(idx),
+        None => {
+            const W: u32 = 320;
+            const H: u32 = 180;
+            let mut rgba = Vec::new();
+            crate::render_dynamic_frame(bg, 0.0, W, H, &mut rgba);
+            let mut rgb = Vec::with_capacity((W * H * 3) as usize);
+            for px in rgba.chunks_exact(4) {
+                rgb.extend_from_slice(&px[0..3]);
+            }
+            PdfImage::rgb(W, H, rgb, None).ok().map(|image| {
+                let idx = pdf.add_image(image);
+                pdf_images.insert(key, idx);
+                idx
+            })
+        }
+    };
+    if let Some(idx) = index {
+        pdf.draw_image_with_transform(page, idx, (rw, rh), [1.0, 0.0, 0.0, -1.0, rx, ry + rh]);
+    }
+}
+
 /// Renders the deck to a PDF; see the module documentation for what matches the editor.
 pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
     let mut pdf = PdfDocument::new();
@@ -144,6 +178,15 @@ pub fn export_pdf(doc: &PresentationDocument) -> Vec<u8> {
                 page_w,
                 PAGE_HEIGHT,
                 PathStyle::filled(bg_rgb),
+            );
+        }
+        if let Some(ref dynamic_bg) = slide.dynamic_bg {
+            draw_dynamic_bg_pdf(
+                &mut pdf,
+                page,
+                dynamic_bg,
+                (0.0, 0.0, page_w, PAGE_HEIGHT),
+                &mut pdf_images,
             );
         }
         let has_title = slide
@@ -197,6 +240,9 @@ pub(crate) fn draw_slide_into_rect(
     let (rx, ry, rw, rh) = rect;
     let bg = parse_rgb(&slide.bg_color).unwrap_or((1.0, 1.0, 1.0));
     pdf.draw_rect(page, rx, ry, rw, rh, PathStyle::filled(bg));
+    if let Some(ref dynamic_bg) = slide.dynamic_bg {
+        draw_dynamic_bg_pdf(pdf, page, dynamic_bg, rect, pdf_images);
+    }
     let page_w = if doc.aspect_ratio_wide {
         PAGE_WIDTH
     } else {

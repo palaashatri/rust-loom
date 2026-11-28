@@ -1,0 +1,145 @@
+import {
+    LoomButton, LoomSegmentedControl, LoomToggle,
+} from "foundation.slint";
+import { Theme } from "theme.slint";
+import { ElementInk } from "object_part.slint";
+
+component DynamicPresetTile inherits Rectangle {
+    in property <int> preset-index: 0;
+    in property <string> title: "";
+    in property <string> short-title: "";
+    in property <brush> swatch-fill: transparent;
+    in property <color> orb-color: transparent;
+    in property <bool> dark-swatch: true;
+    in property <bool> selected: false;
+    callback picked(int);
+
+    horizontal-stretch: 1;
+    height: 46px * max(1.0, Theme.text-scale);
+    border-radius: Theme.tokens.metrics.radius-small;
+    border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : root.selected ? 2px : 1px;
+    border-color: focus.has-focus ? Theme.palette().focus
+        : root.selected ? Theme.palette().accent
+        : Theme.palette().border-strong;
+    background: root.swatch-fill;
+    clip: true;
+
+    accessible-role: button;
+    accessible-label: "Dynamic preset: " + root.title;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.picked(root.preset-index); }
+
+    Rectangle {
+        x: parent.width * 0.45;
+        y: -8px;
+        width: parent.width * 0.65;
+        height: parent.height * 0.9;
+        border-radius: self.height / 2;
+        background: root.orb-color;
+        opacity: 0.45;
+    }
+
+    Text {
+        x: 4px;
+        y: parent.height - self.preferred-height - 4px;
+        width: parent.width - 8px;
+        text: root.short-title;
+        font-size: Theme.type.micro;
+        font-weight: 700;
+        color: root.dark-swatch ? #f8fafc : #1e1b4b;
+        horizontal-alignment: center;
+        overflow: elide;
+        accessible-role: none;
+        accessible-label: "";
+    }
+
+    focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.Return || event.text == " ") {
+                root.picked(root.preset-index);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    TouchArea {
+        clicked => {
+            focus.focus();
+            root.picked(root.preset-index);
+        }
+    }
+}
+
+/// Document inspector Solid vs Dynamic background picker.
+export component DynamicBgPicker inherits VerticalLayout {
+    spacing: Theme.tokens.space.sm;
+
+    LoomSegmentedControl {
+        items: ["Solid", "Dynamic"];
+        label: "Background Style";
+        current: ElementInk.has-dynamic-bg ? 1 : 0;
+        selected(idx) => { ElementInk.dynamic-bg-mode-changed(idx == 1); }
+    }
+
+    if ElementInk.has-dynamic-bg : VerticalLayout {
+        spacing: Theme.tokens.space.sm;
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            for col in 3 : DynamicPresetTile {
+                property <int> k: Theme.rtl ? 2 - col : col;
+                preset-index: self.k;
+                title: self.k == 0 ? "Aurora Veil" : self.k == 1 ? "Solar Mesh" : "Oceanic Silk";
+                short-title: self.k == 0 ? "Aurora" : self.k == 1 ? "Solar" : "Oceanic";
+                swatch-fill: self.k == 0
+                    ? @linear-gradient(135deg, #0b1226 0%, #124e5b 50%, #3d2c6e 100%)
+                    : self.k == 1
+                        ? @linear-gradient(125deg, #26110b 0%, #9a3412 50%, #d97706 100%)
+                        : @linear-gradient(140deg, #061a2b 0%, #0e4f6e 50%, #0d9488 100%);
+                orb-color: self.k == 0 ? #38bdf8 : self.k == 1 ? #fb7185 : #2dd4bf;
+                dark-swatch: true;
+                selected: ElementInk.dynamic-bg-preset == self.k;
+                picked(idx) => { ElementInk.dynamic-bg-preset-picked(idx); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Theme.tokens.space.xs;
+            for col in 3 : DynamicPresetTile {
+                property <int> k: (Theme.rtl ? 2 - col : col) + 3;
+                preset-index: self.k;
+                title: self.k == 3 ? "Prism Glass" : self.k == 4 ? "Obsidian Orbs" : "Botanical Mist";
+                short-title: self.k == 3 ? "Prism" : self.k == 4 ? "Obsidian" : "Botanical";
+                swatch-fill: self.k == 3
+                    ? @linear-gradient(130deg, #f3f0ff 0%, #bae6fd 50%, #fbcfe8 100%)
+                    : self.k == 4
+                        ? @linear-gradient(135deg, #09090b 0%, #312e81 55%, #7e22ce 100%)
+                        : @linear-gradient(130deg, #0a1f18 0%, #14532d 50%, #10b981 100%);
+                orb-color: self.k == 3 ? #c4b5fd : self.k == 4 ? #ec4899 : #84cc16;
+                dark-swatch: self.k != 3;
+                selected: ElementInk.dynamic-bg-preset == self.k;
+                picked(idx) => { ElementInk.dynamic-bg-preset-picked(idx); }
+            }
+        }
+
+        LoomToggle {
+            label: "Animate";
+            checked: ElementInk.dynamic-bg-animate;
+            toggled(val) => { ElementInk.dynamic-bg-animate-toggled(val); }
+        }
+
+        LoomSegmentedControl {
+            items: ["Slow", "Calm", "Lively"];
+            label: "Animation Speed";
+            current: ElementInk.dynamic-bg-speed;
+            selected(idx) => { ElementInk.dynamic-bg-speed-picked(idx); }
+        }
+
+        LoomButton {
+            label: "Apply to All Slides";
+            variant: "secondary";
+            clicked => { ElementInk.dynamic-bg-apply-all(); }
+        }
+    }
+}

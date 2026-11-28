@@ -130,6 +130,18 @@ export global ElementInk {
     in-out property <string> bg-color-label: "Automatic";
     in-out property <color> bg-color-swatch: #ffffff;
 
+    // Procedural Dynamic Background state & callbacks
+    in-out property <bool> has-dynamic-bg: false;
+    in-out property <image> dynamic-bg-image;
+    in-out property <int> dynamic-bg-preset: 0;
+    in-out property <bool> dynamic-bg-animate: true;
+    in-out property <int> dynamic-bg-speed: 1;
+    callback dynamic-bg-mode-changed(bool);
+    callback dynamic-bg-preset-picked(int);
+    callback dynamic-bg-animate-toggled(bool);
+    callback dynamic-bg-speed-picked(int);
+    callback dynamic-bg-apply-all();
+
     in-out property <string> hex-input: "";
     in-out property <string> hex-error: "";
 

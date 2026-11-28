@@ -7,6 +7,7 @@ use loom_package::zip::{self, PackageArchive};
 use serde::{Deserialize, Serialize};
 pub mod animations;
 pub mod arrange;
+pub mod dynamic_bg;
 mod element_style;
 pub mod find_replace;
 pub mod group_lock;
@@ -24,6 +25,7 @@ mod tables;
 pub mod templates;
 pub use animations::*;
 pub use arrange::{AlignMode, DistributeAxis};
+pub use dynamic_bg::{render_dynamic_frame, DynamicBackground, DynamicBgPreset};
 pub use find_replace::{find_matches, replace_all, replace_match, TextMatch};
 pub use list_text::*;
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
@@ -148,6 +150,8 @@ pub struct Slide {
     pub elements: Vec<SlideElement>,
     pub speaker_notes: String,
     pub bg_color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_bg: Option<DynamicBackground>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub animations: Vec<AnimationEntry>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -163,6 +167,7 @@ impl Slide {
             elements: Vec::new(),
             speaker_notes: String::new(),
             bg_color: "#ffffff".to_string(),
+            dynamic_bg: None,
             animations: Vec::new(),
             hidden: false,
         }
@@ -4008,85 +4013,5 @@ Hiring Plan
         assert!(extract_pptx_titles(b"this is not a zip archive").is_err());
         let truncated = &bytes[..bytes.len() / 2];
         assert!(extract_pptx_titles(truncated).is_err());
-    }
-
-    #[test]
-    fn pptx_title_unescapes_entities_and_handles_empty_first_paragraphs() {
-        fn one_slide_archive(slide_body: &str) -> Vec<u8> {
-            let mut pptx = PackageArchive::new();
-            pptx.add(
-                "ppt/slides/slide1.xml",
-                format!("<p:sld><p:cSld><p:spTree>{slide_body}</p:spTree></p:cSld></p:sld>")
-                    .into_bytes(),
-            )
-            .unwrap();
-            pptx.to_bytes().unwrap()
-        }
-
-        // All five entities decode once, across runs, including an attribute-bearing <a:t>.
-        let entities = one_slide_archive(
-            "<a:txBody><a:p>\
-             <a:r><a:t>&amp;&lt;&gt;</a:t></a:r>\
-             <a:r><a:t xml:space=\"preserve\"> &quot;&apos;</a:t></a:r>\
-             </a:p>\
-             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
-        );
-        assert_eq!(extract_pptx_titles(&entities).unwrap(), vec!["&<> \"'"]);
-
-        // First paragraph with only formatting yields an empty title, not the body text.
-        let empty_first = one_slide_archive(
-            "<a:txBody><a:p><a:endParaRPr lang=\"en-US\"/></a:p>\
-             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
-        );
-        assert_eq!(extract_pptx_titles(&empty_first).unwrap(), vec![""]);
-        let slides = slides_from_pptx(&empty_first).unwrap();
-        assert_eq!(slides.len(), 1);
-        assert_eq!(slides[0].title, "");
-        assert_eq!(slides[0].layout, "imported-pptx");
-
-        // A self-closing first paragraph behaves identically.
-        let self_closing = one_slide_archive(
-            "<a:txBody><a:p/>\
-             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
-        );
-        assert_eq!(extract_pptx_titles(&self_closing).unwrap(), vec![""]);
-
-        // Escaped ampersand sequences are not double-decoded.
-        let double_escape =
-            one_slide_archive("<a:p><a:r><a:t>&amp;amp; stays literal</a:t></a:r></a:p>");
-        assert_eq!(
-            extract_pptx_titles(&double_escape).unwrap(),
-            vec!["&amp; stays literal"]
-        );
-    }
-
-    #[test]
-    fn pptx_export_round_trips_through_import() {
-        let titles = vec![
-            "Opening".to_string(),
-            "Split & <Escaped>".to_string(),
-            String::new(),
-            "Closing".to_string(),
-        ];
-
-        let pptx = export_pptx_from_titles(&titles).expect("export succeeds");
-        let extracted = extract_pptx_titles(&pptx).expect("re-import succeeds");
-
-        // Titles round-trip in order, including empty slides and entities.
-        assert_eq!(extracted, titles);
-
-        // Numeric slide ordering holds beyond nine parts.
-        let many: Vec<String> = (0..12).map(|i| format!("Slide {i}")).collect();
-        let big = export_pptx_from_titles(&many).unwrap();
-        assert_eq!(extract_pptx_titles(&big).unwrap(), many);
-
-        // Deck skeletons build from the export.
-        let deck = slides_from_pptx(&pptx).unwrap();
-        assert_eq!(deck.len(), 4);
-        assert_eq!(deck[2].title, "");
-
-        // Empty decks are rejected by the importer's no-parts rule.
-        let none = export_pptx_from_titles(&[]).unwrap();
-        assert!(extract_pptx_titles(&none).is_err());
     }
 }

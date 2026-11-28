@@ -295,3 +295,80 @@ fn unescape_xml_entities(text: &str) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use loom_package::zip::PackageArchive;
+
+    #[test]
+    fn pptx_title_unescapes_entities_and_handles_empty_first_paragraphs() {
+        fn one_slide_archive(slide_body: &str) -> Vec<u8> {
+            let mut pptx = PackageArchive::new();
+            pptx.add(
+                "ppt/slides/slide1.xml",
+                format!("<p:sld><p:cSld><p:spTree>{slide_body}</p:spTree></p:cSld></p:sld>")
+                    .into_bytes(),
+            )
+            .unwrap();
+            pptx.to_bytes().unwrap()
+        }
+
+        let entities = one_slide_archive(
+            "<a:txBody><a:p>\
+             <a:r><a:t>&amp;&lt;&gt;</a:t></a:r>\
+             <a:r><a:t xml:space=\"preserve\"> &quot;&apos;</a:t></a:r>\
+             </a:p>\
+             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
+        );
+        assert_eq!(extract_pptx_titles(&entities).unwrap(), vec!["&<> \"'"]);
+
+        let empty_first = one_slide_archive(
+            "<a:txBody><a:p><a:endParaRPr lang=\"en-US\"/></a:p>\
+             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
+        );
+        assert_eq!(extract_pptx_titles(&empty_first).unwrap(), vec![""]);
+        let slides = slides_from_pptx(&empty_first).unwrap();
+        assert_eq!(slides.len(), 1);
+        assert_eq!(slides[0].title, "");
+        assert_eq!(slides[0].layout, "imported-pptx");
+
+        let self_closing = one_slide_archive(
+            "<a:txBody><a:p/>\
+             <a:p><a:r><a:t>body ignored</a:t></a:r></a:p></a:txBody>",
+        );
+        assert_eq!(extract_pptx_titles(&self_closing).unwrap(), vec![""]);
+
+        let double_escape =
+            one_slide_archive("<a:p><a:r><a:t>&amp;amp; stays literal</a:t></a:r></a:p>");
+        assert_eq!(
+            extract_pptx_titles(&double_escape).unwrap(),
+            vec!["&amp; stays literal"]
+        );
+    }
+
+    #[test]
+    fn pptx_export_round_trips_through_import() {
+        let titles = vec![
+            "Opening".to_string(),
+            "Split & <Escaped>".to_string(),
+            String::new(),
+            "Closing".to_string(),
+        ];
+
+        let pptx = export_pptx_from_titles(&titles).expect("export succeeds");
+        let extracted = extract_pptx_titles(&pptx).expect("re-import succeeds");
+        assert_eq!(extracted, titles);
+
+        let many: Vec<String> = (0..12).map(|i| format!("Slide {i}")).collect();
+        let big = export_pptx_from_titles(&many).unwrap();
+        assert_eq!(extract_pptx_titles(&big).unwrap(), many);
+
+        let deck = slides_from_pptx(&pptx).unwrap();
+        assert_eq!(deck.len(), 4);
+        assert_eq!(deck[2].title, "");
+
+        let none = export_pptx_from_titles(&[]).unwrap();
+        assert!(extract_pptx_titles(&none).is_err());
+    }
+}

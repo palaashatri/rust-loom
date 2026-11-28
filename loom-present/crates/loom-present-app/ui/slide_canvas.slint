@@ -34,6 +34,8 @@ export component PresentSlideCanvas inherits Rectangle {
     in property <[float]> element-rotations: [];
     in property <bool> has-slide-bg: false;
     in property <color> slide-bg: DocumentInk.paper;
+    in property <bool> has-dynamic-bg: ElementInk.has-dynamic-bg;
+    in property <image> dynamic-bg-image: ElementInk.dynamic-bg-image;
     in property <[int]> element-types: [];
     in property <[image]> element-images: [];
     in property <[[ObjectPart]]> element-parts: ObjectParts.main;
@@ -130,6 +132,17 @@ export component PresentSlideCanvas inherits Rectangle {
             drop-shadow-offset-y: root.miniature ? 0px : 6px;
             drop-shadow-color: root.miniature ? transparent : Theme.palette().shadow;
             clip: true;
+
+            if root.has-dynamic-bg : Image {
+                x: 0px;
+                y: 0px;
+                width: 100%;
+                height: 100%;
+                source: root.dynamic-bg-image;
+                image-fit: cover;
+                accessible-role: none;
+                accessible-label: "";
+            }
 
             canvas-touch := TouchArea {
                 enabled: root.editing-enabled;

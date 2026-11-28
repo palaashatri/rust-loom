@@ -18,6 +18,8 @@ export struct ThumbRows {
     parts: [[ObjectPart]],
     has-bg-color: bool,
     bg-color: color,
+    has-dynamic-bg: bool,
+    dynamic-bg-image: image,
 }
 
 /// A miniature slide: the editor's own slide canvas at thumbnail size, drawn
@@ -27,6 +29,8 @@ export component MiniSlide inherits Rectangle {
     in property <string> description;
     in property <bool> aspect-ratio-wide: true;
     in property <int> slide-number: 1;
+    in property <bool> live-dynamic-bg: false;
+    in property <image> live-dynamic-bg-image;
     height: self.width * (root.aspect-ratio-wide ? 0.5625 : 0.75);
     accessible-role: image;
     accessible-label: root.description;
@@ -51,6 +55,8 @@ export component MiniSlide inherits Rectangle {
         element-parts: root.rows.parts;
         has-slide-bg: root.rows.has-bg-color;
         slide-bg: root.rows.bg-color;
+        has-dynamic-bg: root.live-dynamic-bg ? true : root.rows.has-dynamic-bg;
+        dynamic-bg-image: root.live-dynamic-bg ? root.live-dynamic-bg-image : root.rows.dynamic-bg-image;
     }
 }
 
