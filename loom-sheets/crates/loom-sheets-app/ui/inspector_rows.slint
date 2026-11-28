@@ -48,7 +48,7 @@ component SheetValueBox inherits Rectangle {
     background: Theme.palette().surface-sunken;
     // High contrast gives every field an outline: the sunken well is the same
     // black as the panel, so a borderless value does not read as a field.
-    border-width: Theme.active-theme == "high-contrast" ? 1px : 0px;
+    border-width: Theme.is-high-contrast ? 1px : 0px;
     border-color: Theme.palette().border;
     accessible-role: AccessibleRole.text;
     accessible-label: root.field-label;

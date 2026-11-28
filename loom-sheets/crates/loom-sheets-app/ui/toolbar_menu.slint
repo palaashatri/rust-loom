@@ -21,28 +21,45 @@ export component SheetToolbarMenu inherits Rectangle {
     public function focus-menu() { menu-focus.focus(); }
 
     property <int> selected: 0;
-    property <[string]> labels: root.kind == 1 ? ["Format Inspector", "Command Palette", "Welcome Guide", "Appearance: System", "Appearance: Light", "Appearance: Dark", "Appearance: High Contrast"]
+    property <[string]> labels: root.kind == 1 ? ["Format Inspector", "Command Palette", "Welcome Guide", "Appearance: System", "Appearance: Light", "Appearance: Dark", "Appearance: High Contrast", "Appearance: High Contrast Light", "Appearance: Monokai Dark", "Appearance: Monokai Light", "Appearance: Solarized Dark", "Appearance: Solarized Light", "Appearance: Nord", "Appearance: Catppuccin Mocha", "Appearance: Catppuccin Latte"]
         : root.kind == 2 ? ["Zoom In", "Zoom Out", "Actual Size"]
         : root.kind == 3 ? ["Add Row", "Add Column", "Sort", "Sort Descending", "Delete Row", "Delete Column", "Freeze Header Row", "Delete Sheet"]
         : root.kind == 4 ? ["Bold", "Italic", "Underline", "Align Left", "Align Center", "Align Right"]
         : root.kind == 5 ? ["Export CSV", "Export Excel", "Export PDF"] : [];
-    property <[string]> ids: root.kind == 1 ? ["view.inspector", "app.palette", "help.welcome", "view.appearance.system", "view.appearance.light", "view.appearance.dark", "view.appearance.high_contrast"]
+    property <[string]> ids: root.kind == 1 ? ["view.inspector", "app.palette", "help.welcome", "view.appearance.system", "view.appearance.light", "view.appearance.dark", "view.appearance.high_contrast", "view.appearance.high_contrast_light", "view.appearance.monokai_dark", "view.appearance.monokai_light", "view.appearance.solarized_dark", "view.appearance.solarized_light", "view.appearance.nord", "view.appearance.catppuccin_mocha", "view.appearance.catppuccin_latte"]
         : root.kind == 2 ? ["view.zoom_in", "view.zoom_out", "view.zoom_actual"]
         : root.kind == 3 ? ["table.add_row", "table.add_col", "sheets.organize", "table.sort_desc", "table.delete_row", "table.delete_col", "table.freeze_header", "sheets.delete_sheet"]
         : root.kind == 4 ? ["format.bold", "format.italic", "format.underline", "format.align_left", "format.align_center", "format.align_right"]
         : root.kind == 5 ? ["file.export_csv", "file.export_xlsx", "file.export_pdf"] : [];
-    property <[string]> shortcuts: root.kind == 1 ? [root.mod-key + "Alt+I", root.mod-key + "K", root.mod-key + "Shift+/", root.mod-key + "Alt+6", root.mod-key + "Alt+7", root.mod-key + "Shift+D", root.mod-key + "Shift+H"]
+    property <[string]> shortcuts: root.kind == 1 ? [root.mod-key + "Alt+I", root.mod-key + "K", root.mod-key + "Shift+/", root.mod-key + "Alt+6", root.mod-key + "Alt+7", root.mod-key + "Shift+D", root.mod-key + "Shift+H", "", "", "", "", "", "", "", ""]
         : root.kind == 2 ? [root.mod-key + "=", root.mod-key + "-", root.mod-key + "0"]
         : root.kind == 3 ? [root.mod-key + "Alt+R", root.mod-key + "Alt+K", root.mod-key + "Alt+S", root.mod-key + "Alt+D", root.mod-key + "Alt+W", root.mod-key + "Alt+L", root.mod-key + "Alt+F", root.mod-key + "Alt+X"]
         : root.kind == 4 ? [root.mod-key + "B", root.mod-key + "I", root.mod-key + "U", root.mod-key + "Shift+L", root.mod-key + "Shift+M", root.mod-key + "Shift+R"]
         : root.kind == 5 ? [root.mod-key + "E", root.mod-key + "Shift+E", root.mod-key + "P"] : [];
-    property <[bool]> checks: root.kind == 1 ? [root.inspector-visible, false, false, Theme.appearance == "system", Theme.appearance == "light", Theme.appearance == "dark", Theme.appearance == "high-contrast"]
+    property <[bool]> checks: root.kind == 1 ? [root.inspector-visible, false, false, Theme.appearance == "system", Theme.appearance == "light", Theme.appearance == "dark", Theme.appearance == "high-contrast", Theme.appearance == "high-contrast-light", Theme.appearance == "monokai-dark", Theme.appearance == "monokai-light", Theme.appearance == "solarized-dark", Theme.appearance == "solarized-light", Theme.appearance == "nord", Theme.appearance == "catppuccin-mocha", Theme.appearance == "catppuccin-latte"]
         : root.kind == 4 ? [root.cell-bold, root.cell-italic, root.cell-underline,
             root.cell-alignment == 0, root.cell-alignment == 1, root.cell-alignment == 2] : [];
-    property <[bool]> checkables: root.kind == 1 ? [true, false, false, true, true, true, true]
+    property <[bool]> checkables: root.kind == 1 ? [true, false, false, true, true, true, true, true, true, true, true, true, true, true, true]
         : root.kind == 4 ? [true, true, true, true, true, true] : [];
 
-    changed kind => { root.selected = 0; }
+    changed kind => {
+        root.selected = 0;
+        menu-scroll.viewport-y = 0px;
+    }
+
+    changed selected => {
+        if (root.labels.length > 0 && items.preferred-height > menu-scroll.height) {
+            let step = items.preferred-height / root.labels.length;
+            let row-top = root.selected * step;
+            let row-bottom = row-top + step;
+            let view-top = -menu-scroll.viewport-y;
+            if (row-top < view-top) {
+                menu-scroll.viewport-y = -row-top;
+            } else if (row-bottom > view-top + menu-scroll.height) {
+                menu-scroll.viewport-y = -(row-bottom - menu-scroll.height);
+            }
+        }
+    }
 
     visible: root.kind != 0;
     background: transparent;
@@ -69,7 +86,7 @@ export component SheetToolbarMenu inherits Rectangle {
             : max(0px, min(root.menu-x, root.width - self.width - 8px));
         y: root.menu-y;
         width: min(296px * max(1.0, Theme.text-scale), max(1px, root.width - 16px));
-        height: items.preferred-height;
+        height: min(items.preferred-height, max(140px, root.height - root.menu-y - 16px));
         border-radius: Theme.tokens.metrics.radius-medium;
         border-width: 1px;
         border-color: Theme.palette().border;
@@ -78,17 +95,36 @@ export component SheetToolbarMenu inherits Rectangle {
         drop-shadow-offset-y: 4px;
         drop-shadow-color: Theme.palette().shadow;
 
-        items := VerticalLayout {
-            spacing: 2px;
-            padding: Theme.tokens.space.sm;
-            for label[idx] in root.labels : LoomMenuItem {
-                label: label;
-                shortcut: idx < root.shortcuts.length ? root.shortcuts[idx] : "";
-                checked: idx < root.checks.length && root.checks[idx];
-                checkable: idx < root.checkables.length && root.checkables[idx];
-                selected: idx == root.selected;
-                pointer-hovered => { root.selected = idx; }
-                activated => { root.command(root.ids[idx]); }
+        Rectangle {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            height: parent.height;
+            border-radius: Theme.tokens.metrics.radius-medium;
+            clip: true;
+
+            menu-scroll := Flickable {
+                x: 0px;
+                y: 0px;
+                width: parent.width;
+                height: parent.height;
+                viewport-width: self.width;
+                viewport-height: items.preferred-height;
+
+                items := VerticalLayout {
+                    width: parent.width;
+                    spacing: 2px;
+                    padding: Theme.tokens.space.sm;
+                    for label[idx] in root.labels : LoomMenuItem {
+                        label: label;
+                        shortcut: idx < root.shortcuts.length ? root.shortcuts[idx] : "";
+                        checked: idx < root.checks.length && root.checks[idx];
+                        checkable: idx < root.checkables.length && root.checkables[idx];
+                        selected: idx == root.selected;
+                        pointer-hovered => { root.selected = idx; }
+                        activated => { root.command(root.ids[idx]); }
+                    }
+                }
             }
         }
     }

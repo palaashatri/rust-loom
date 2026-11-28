@@ -131,7 +131,9 @@ fn sheets_palette_invocation_uses_rendered_row_when_history_changes() {
     rebuild_palette(&app, "");
     assert_eq!(
         app.get_palette_commands().row_count(),
-        91 + 1 + usize::from(loom_desktop::window_frame::SUPPORTED),
+        87 + loom_desktop::Appearance::ALL.len()
+            + 1
+            + usize::from(loom_desktop::window_frame::SUPPORTED),
     );
     let redo_row = app.get_palette_commands().row_count() - 1;
     assert_eq!(
@@ -542,6 +544,19 @@ fn every_palette_command_and_menu_item_exposes_a_shortcut() {
     let commands = master_palette(&app);
     assert!(commands.len() >= 54);
     for cmd in &commands {
+        // The 4 core appearances expose global shortcuts; additional HC Light
+        // and Studio presets are invoked via the View menu or command palette.
+        if cmd.id.starts_with("view.appearance.")
+            && !matches!(
+                cmd.id,
+                "view.appearance.system"
+                    | "view.appearance.light"
+                    | "view.appearance.dark"
+                    | "view.appearance.high_contrast"
+            )
+        {
+            continue;
+        }
         assert!(
             !cmd.shortcut.is_empty(),
             "command {} ({}) must define a keyboard shortcut",

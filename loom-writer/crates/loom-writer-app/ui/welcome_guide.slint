@@ -287,7 +287,7 @@ export component WelcomeGuideModal inherits Rectangle {
                                     border-radius: self.height / 2;
                                     background: Theme.palette().selection-soft;
                                     border-width: 1px;
-                                    border-color: Theme.active-theme == "high-contrast" ? Theme.palette().accent : transparent;
+                                    border-color: Theme.is-high-contrast ? Theme.palette().accent : transparent;
 
                                     pill-label := Text {
                                         text: "STEP " + (root.clamped-step() + 1) + " OF 7";

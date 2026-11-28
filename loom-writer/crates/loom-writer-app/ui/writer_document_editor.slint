@@ -7,7 +7,7 @@ import { PageImages, WriterCommentRect, WriterPageImage, WriterRenderBlock, Writ
 component PictureCornerHandle inherits Rectangle {
     width: 8px;
     height: 8px;
-    background: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().selection;
+    background: Theme.is-high-contrast ? Theme.palette().paper-ink : Theme.palette().selection;
     border-width: 1px;
     border-color: Theme.palette().paper;
     accessible-role: none;
@@ -38,7 +38,7 @@ component PageImageView inherits Rectangle {
         height: parent.height;
         background: Theme.palette().surface-sunken;
         border-width: max(1px, 1px * root.page-zoom);
-        border-color: Theme.active-theme == "high-contrast"
+        border-color: Theme.is-high-contrast
             ? Theme.palette().border
             : Theme.palette().danger;
         border-radius: Theme.tokens.metrics.radius-small;
@@ -67,7 +67,7 @@ component PageImageView inherits Rectangle {
         width: parent.width;
         height: parent.height;
         border-width: 2px;
-        border-color: Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink : Theme.palette().selection;
+        border-color: Theme.is-high-contrast ? Theme.palette().paper-ink : Theme.palette().selection;
         visible: pic.selected;
         accessible-role: none;
     }
@@ -196,7 +196,7 @@ export component WriterDocumentEditor inherits Rectangle {
             background: comment.fill;
             // High contrast outlines each anchor in page ink, so its edge does not
             // depend on the highlight colour.
-            border-width: Theme.active-theme == "high-contrast" ? 2px : 0px;
+            border-width: Theme.is-high-contrast ? 2px : 0px;
             border-color: Theme.palette().paper-ink;
             accessible-role: none;
         }
@@ -219,10 +219,10 @@ export component WriterDocumentEditor inherits Rectangle {
                 + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
             height: max(1px, cell.height * root.page-zoom)
                 + (cell.table-cell ? cell.border-width * root.page-zoom : 0px);
-            background: Theme.active-theme == "high-contrast" && cell.table-cell
+            background: Theme.is-high-contrast && cell.table-cell
                 ? Theme.palette().paper
                 : cell.has-bg ? cell.bg-color : transparent;
-            border-color: Theme.active-theme == "high-contrast" && cell.table-cell
+            border-color: Theme.is-high-contrast && cell.table-cell
                 ? Theme.palette().paper-ink
                 : cell.table-cell
                     ? root.table-line(cell.has-bg ? root.luminance(cell.bg-color) : 1.0)
@@ -269,7 +269,7 @@ export component WriterDocumentEditor inherits Rectangle {
             width: max(1px, cell.width * root.page-zoom);
             height: max(1px, cell.height * root.page-zoom);
             background: Theme.palette().selection.with-alpha(0.22);
-            border-color: Theme.active-theme == "high-contrast" && cell.table-cell
+            border-color: Theme.is-high-contrast && cell.table-cell
                 ? cell.selection-border-color
                 : Theme.palette().selection;
             border-width: max(1px, 2px * root.page-zoom);
@@ -316,7 +316,7 @@ export component WriterDocumentEditor inherits Rectangle {
             width: max(1px, block.width * root.page-zoom);
             height: block.height * root.page-zoom;
             accessible-role: none;
-            property <color> ink: Theme.active-theme == "high-contrast" && block.table-cell
+            property <color> ink: Theme.is-high-contrast && block.table-cell
                 ? Theme.palette().paper-ink
                 : block.has-color ? block.color
                 : root.page-appearance == "black" ? #FFFFFF : #000000;
@@ -348,7 +348,7 @@ export component WriterDocumentEditor inherits Rectangle {
                 font-size: segment.size * 1px * root.page-zoom;
                 font-weight: segment.weight;
                 font-italic: segment.italic;
-                color: Theme.active-theme == "high-contrast" && block.table-cell
+                color: Theme.is-high-contrast && block.table-cell
                     ? Theme.palette().paper-ink
                     : segment.has-color ? segment.color : parent.ink;
                 wrap: block.positioned ? TextWrap.no-wrap : TextWrap.word-wrap;
@@ -395,10 +395,10 @@ export component WriterDocumentEditor inherits Rectangle {
             y: selection.y * root.page-zoom;
             width: mark-width;
             height: max(1px, selection.height * root.page-zoom);
-            background: Theme.active-theme == "high-contrast" && selection.table-cell
+            background: Theme.is-high-contrast && selection.table-cell
                 ? Theme.palette().paper-ink
                 : selection.has-color ? selection.color
-                : Theme.active-theme == "high-contrast" ? Theme.palette().paper-ink
+                : Theme.is-high-contrast ? Theme.palette().paper-ink
                 : root.page-appearance == "black" ? #FFFFFF : #000000;
             visible: selection.caret && (editor.has-focus || root.selection-anchor == root.selection-focus);
             accessible-role: none;

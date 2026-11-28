@@ -49,6 +49,14 @@ export component WriterToolbarMenu inherits Rectangle {
             { id: "view.appearance.light", label: "Appearance: Light", shortcut: "", checked: Theme.appearance == "light", checkable: true, enabled: true },
             { id: "view.appearance.dark", label: "Appearance: Dark", shortcut: "", checked: Theme.appearance == "dark", checkable: true, enabled: true },
             { id: "view.appearance.high_contrast", label: "Appearance: High Contrast", shortcut: "", checked: Theme.appearance == "high-contrast", checkable: true, enabled: true },
+            { id: "view.appearance.high_contrast_light", label: "Appearance: High Contrast Light", shortcut: "", checked: Theme.appearance == "high-contrast-light", checkable: true, enabled: true },
+            { id: "view.appearance.monokai_dark", label: "Appearance: Monokai Dark", shortcut: "", checked: Theme.appearance == "monokai-dark", checkable: true, enabled: true },
+            { id: "view.appearance.monokai_light", label: "Appearance: Monokai Light", shortcut: "", checked: Theme.appearance == "monokai-light", checkable: true, enabled: true },
+            { id: "view.appearance.solarized_dark", label: "Appearance: Solarized Dark", shortcut: "", checked: Theme.appearance == "solarized-dark", checkable: true, enabled: true },
+            { id: "view.appearance.solarized_light", label: "Appearance: Solarized Light", shortcut: "", checked: Theme.appearance == "solarized-light", checkable: true, enabled: true },
+            { id: "view.appearance.nord", label: "Appearance: Nord", shortcut: "", checked: Theme.appearance == "nord", checkable: true, enabled: true },
+            { id: "view.appearance.catppuccin_mocha", label: "Appearance: Catppuccin Mocha", shortcut: "", checked: Theme.appearance == "catppuccin-mocha", checkable: true, enabled: true },
+            { id: "view.appearance.catppuccin_latte", label: "Appearance: Catppuccin Latte", shortcut: "", checked: Theme.appearance == "catppuccin-latte", checkable: true, enabled: true },
         ]
         : root.kind == 2 ? [
             { id: "view.zoom_in", label: "Zoom In", shortcut: root.primary-mod + "+=", checked: false, checkable: false, enabled: root.page-zoom < 1.99 },

@@ -6,7 +6,7 @@ export component MergedCellLayer inherits Rectangle {
     in property <bool> editing: false;
     in property <string> edit-text: "";
 
-    property <color> readable-line: Theme.active-theme == "high-contrast"
+    property <color> readable-line: Theme.is-high-contrast
         ? Theme.palette().paper
         : Theme.palette().paper-line;
 
@@ -23,7 +23,7 @@ export component MergedCellLayer inherits Rectangle {
             : m.fill-idx == 4 ? #BFDBFE
             : m.fill-idx == 5 ? #DDD6FE
             : m.fill-idx == 6 ? #E5E7EB
-            : m.in-selection && !m.is-active ? (Theme.active-theme == "light" ? Theme.palette().selection-soft : root.readable-line)
+            : m.in-selection && !m.is-active ? (!Theme.is-dark ? Theme.palette().selection-soft : root.readable-line)
             : Theme.palette().paper;
         border-width: m.is-active ? 2px : 1px;
         border-color: m.is-active ? Theme.palette().accent : Theme.palette().paper-line;
