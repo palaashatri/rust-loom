@@ -4,9 +4,9 @@ Loom is an original, local-first creative software suite built with Rust and Sli
 
 The v1 scope on `main` is three desktop applications. Their acceptance status is in the [current-truth section](docs/workflow/current.md#current-truth).
 
-- [**Loom Writer**](loom-writer/README.md) — Document composition with structured inspectors, rich typography, image text wrapping, inline hyperlinks, Format Painter, tables, lists, headers/footers, footnotes, comments, tracked changes, Outline Navigator, Print Preview, and DOCX/PDF/Markdown export.
-- [**Loom Sheets**](loom-sheets/README.md) — Analytical spreadsheet with multi-sheet workbooks, 2,000+ Excel-compatible formulas, smart series auto-fill, freeze panes & row/column hiding, Format Painter, formula auditing, conditional formatting, data tools, pivot tables, charts, and full OOXML XLSX/CSV/PDF export.
-- [**Loom Present**](loom-present/README.md) — Presentation design with categorized theme chooser, slide navigator & full-window Slide Sorter, element effects, grouping/locking/flip, build animations, speaker notes, presenter view with annotations & jump-to-slide, and PPTX/PDF export.
+- <img src="loom-core/crates/loom-ui/ui/app-icons/loom-writer.512.png" width="24" height="24" alt="Loom Writer icon" /> [**Loom Writer**](loom-writer/README.md) — Document composition with structured inspectors, rich typography, image text wrapping, inline hyperlinks, Format Painter, tables, lists, headers/footers, footnotes, comments, tracked changes, Outline Navigator, Print Preview, and DOCX/PDF/Markdown export.
+- <img src="loom-core/crates/loom-ui/ui/app-icons/loom-sheets.512.png" width="24" height="24" alt="Loom Sheets icon" /> [**Loom Sheets**](loom-sheets/README.md) — Analytical spreadsheet with multi-sheet workbooks, 2,000+ Excel-compatible formulas, smart series auto-fill, freeze panes & row/column hiding, Format Painter, formula auditing, conditional formatting, data tools, pivot tables, charts, and full OOXML XLSX/CSV/PDF export.
+- <img src="loom-core/crates/loom-ui/ui/app-icons/loom-present.512.png" width="24" height="24" alt="Loom Present icon" /> [**Loom Present**](loom-present/README.md) — Presentation design with categorized theme chooser, slide navigator & full-window Slide Sorter, element effects, grouping/locking/flip, build animations, speaker notes, presenter view with annotations & jump-to-slide, and PPTX/PDF export.
 
 ## Visual showcase
 

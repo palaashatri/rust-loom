@@ -33,5 +33,6 @@ Open only the named section needed to establish an original finding, owner grant
 | [Linux QA, Nov 01](qa/linux-2026-11-01/README.md) | Dated Linux desktop QA run record |
 | [Linux QA, Nov 06](qa/linux-2026-11-06/README.md) | Dated Linux desktop QA run record |
 | [Linux QA, Nov 07](qa/linux-2026-11-07/README.md) | Dated Linux desktop QA run record |
+| [macOS Native UI & Logo Audit, Nov 28](qa/macos-2026-11-28/README.md) | Dated macOS 27.2.1 Design Bible, logo, and Apple iWork 14.5 comparison record |
 
 Migration evidence is in `.work/docs-split-20261027/`: the pre-split source snapshot, exact line-range hashes, final file hashes, caller/link checks and focused governance outputs. Ignored evidence is not a second authority.
