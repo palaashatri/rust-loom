@@ -451,7 +451,7 @@ mod visual_tests {
         let high_contrast = theme.get_tokens();
         assert_eq!(
             high_contrast.palette.canvas,
-            slint::Color::from_argb_encoded(0xff000000)
+            slint::Color::from_argb_encoded(0xff0a0b0f)
         );
         assert!(high_contrast.reduced_motion);
         assert_eq!(high_contrast.motion.standard_ms, 0);

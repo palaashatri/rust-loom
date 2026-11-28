@@ -432,7 +432,7 @@ export component LoomToggle inherits Rectangle {
             // otherwise be drawn on a white track of the same colour.
             background: !root.enabled ? Theme.palette().surface-sunken
                 : root.checked ? (touch.has-hover ? Theme.palette().accent-hover : Theme.palette().accent)
-                : Theme.active-theme == "high-contrast" ? Theme.palette().surface
+                : Theme.is-high-contrast ? Theme.palette().surface
                 : Theme.palette().ink-secondary;
             Rectangle {
                 x: root.checked != Theme.rtl ? 16px : 2px;
@@ -518,7 +518,7 @@ export component LoomSegmentedControl inherits Rectangle {
                 width: 1px;
                 height: 12px;
                 background: Theme.palette().border;
-                visible: rel != root.current && prev-rel != root.current && Theme.active-theme != "high-contrast";
+                visible: rel != root.current && prev-rel != root.current && !Theme.is-high-contrast;
             }
             item-label := Text {
                 text: root.items[rel];
