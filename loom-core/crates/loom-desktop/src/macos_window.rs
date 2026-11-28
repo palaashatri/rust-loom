@@ -11,15 +11,44 @@
 /// Apply the active Loom theme to a native window where the platform has one.
 pub fn apply<W: ?Sized>(_window: &W, _theme: &str) {}
 
+#[cfg(not(target_os = "macos"))]
+/// Set the application Dock/taskbar icon from PNG bytes.
+pub fn set_app_icon(_png_bytes: &[u8]) {}
+
+#[cfg(not(target_os = "macos"))]
+/// Mark the native window's document as having unsaved changes.
+pub fn set_document_edited<W: ?Sized>(_window: &W, _edited: bool) {}
+
+#[cfg(not(target_os = "macos"))]
+/// Associate a filesystem path with the native window (proxy icon on macOS).
+pub fn set_represented_path<W: ?Sized>(_window: &W, _path: Option<&std::path::Path>) {}
+
+/// Format a window title for the active platform.
+///
+/// On macOS, native `setDocumentEdited:` and `setRepresentedURL:` convey dirty
+/// state and app identity, so the title stays clean (`document_name`).
+/// On other platforms, appends `*` when dirty and ` — {app_name}`.
+pub fn format_window_title(document_name: &str, dirty: bool, app_name: &str) -> String {
+    if cfg!(target_os = "macos") {
+        document_name.to_string()
+    } else {
+        let dirty_suffix = if dirty { "*" } else { "" };
+        format!("{document_name}{dirty_suffix} — {app_name}")
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 mod platform {
+    use objc2::{AnyThread, MainThreadMarker};
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceName,
         NSAppearanceNameAccessibilityHighContrastDarkAqua, NSAppearanceNameAqua,
-        NSAppearanceNameDarkAqua, NSColor, NSTitlebarSeparatorStyle, NSView,
+        NSAppearanceNameDarkAqua, NSApplication, NSColor, NSImage, NSTitlebarSeparatorStyle,
+        NSView,
     };
     use objc2_core_foundation::CGFloat;
+    use objc2_foundation::{NSData, NSString, NSURL};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     /// One native titlebar palette derived from the active Loom theme.
@@ -91,6 +120,70 @@ mod platform {
         }
     }
 
+    /// Set the application Dock/Cmd+Tab icon from PNG bytes.
+    pub fn set_app_icon(png_bytes: &[u8]) {
+        if png_bytes.is_empty() {
+            return;
+        }
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        let data = NSData::with_bytes(png_bytes);
+        let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) else {
+            return;
+        };
+        let app = NSApplication::sharedApplication(mtm);
+        unsafe {
+            app.setApplicationIconImage(Some(&image));
+        }
+    }
+
+    /// Mark the AppKit window's close button with a native dirty dot.
+    pub fn set_document_edited<W: HasWindowHandle + ?Sized>(window: &W, edited: bool) {
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return;
+        };
+        unsafe {
+            let view = &*appkit.ns_view.as_ptr().cast::<NSView>();
+            let Some(window) = view.window() else {
+                return;
+            };
+            window.setDocumentEdited(edited);
+        }
+    }
+
+    /// Set or clear the AppKit window's represented file URL (proxy icon).
+    pub fn set_represented_path<W: HasWindowHandle + ?Sized>(
+        window: &W,
+        path: Option<&std::path::Path>,
+    ) {
+        let Ok(handle) = window.window_handle() else {
+            return;
+        };
+        let RawWindowHandle::AppKit(appkit) = handle.as_raw() else {
+            return;
+        };
+        unsafe {
+            let view = &*appkit.ns_view.as_ptr().cast::<NSView>();
+            let Some(window) = view.window() else {
+                return;
+            };
+            match path.and_then(|p| p.to_str()) {
+                Some(path_str) => {
+                    let ns_path = NSString::from_str(path_str);
+                    let url = NSURL::fileURLWithPath(&ns_path);
+                    window.setRepresentedURL(Some(&url));
+                }
+                None => {
+                    window.setRepresentedURL(None);
+                }
+            }
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::chrome;
@@ -117,4 +210,22 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::apply;
+pub use platform::{apply, set_app_icon, set_document_edited, set_represented_path};
+
+#[cfg(test)]
+mod title_tests {
+    use super::format_window_title;
+
+    #[test]
+    fn format_window_title_respects_platform_conventions() {
+        let clean = format_window_title("Untitled.loom", false, "Loom Writer");
+        let dirty = format_window_title("Untitled.loom", true, "Loom Writer");
+        if cfg!(target_os = "macos") {
+            assert_eq!(clean, "Untitled.loom");
+            assert_eq!(dirty, "Untitled.loom");
+        } else {
+            assert_eq!(clean, "Untitled.loom — Loom Writer");
+            assert_eq!(dirty, "Untitled.loom* — Loom Writer");
+        }
+    }
+}

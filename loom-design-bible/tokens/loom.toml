@@ -247,7 +247,7 @@ semibold = 600
 bold = 700
 
 [type.family]
-ui = "Noto Sans"
+ui = "Inter"
 serif = "Noto Serif"
 mono = "Noto Sans Mono"
 fallback = ["Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans KR", "Noto Sans Arabic", "Noto Sans Devanagari", "DejaVu Sans", "sans-serif"]
