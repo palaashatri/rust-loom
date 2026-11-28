@@ -224,9 +224,12 @@ pub(crate) fn project_scroll(app: &SheetsApp, state: &GuiState) {
         || mat_rows.last().copied().map(|r| r as i32)
             != current_rows.row_data(current_rows.row_count().saturating_sub(1))
         || viewport.visible_cols as usize != app.get_cols().row_count();
+    let existing = app.get_object_views();
+    if !window_moved && sheet.objects.is_empty() && existing.row_count() == 0 {
+        return;
+    }
     let fit_col_width = valid_dimension(app.get_grid_col_width() / zoom, GRID_COL_WIDTH);
     let geometry = grid_geometry_fit(&sheet, dimensions, viewport, fit_col_width, zoom);
-    let existing = app.get_object_views();
     let reusable = existing.row_count() == sheet.objects.len();
     let objects = project_sheet_objects(
         &sheet,

@@ -243,4 +243,49 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn welcome_guide_highlights_card_stays_within_modal_bounds() {
+        use i_slint_backend_testing::ElementHandle;
+
+        crate::set_platform();
+        for scale in [1.0f32, 1.5, 2.0] {
+            for rtl in [false, true] {
+                let app = SheetsApp::new().expect("create SheetsApp");
+                app.window().set_size(slint::PhysicalSize::new(1280, 800));
+                app.set_template_text_scale(scale);
+                crate::configure_direction(&app, rtl);
+                app.set_welcome_open(true);
+                for step in 0..7 {
+                    app.set_welcome_step(step);
+                    let _ = crate::snapshot_component(&app, 1280.0, 800.0, 1.0)
+                        .expect("render Welcome Guide step");
+                    let panel = ElementHandle::find_by_element_id(&app, "WelcomeGuideModal::panel")
+                        .next()
+                        .expect("WelcomeGuideModal::panel");
+                    let panel_left = panel.absolute_position().x;
+                    let panel_right = panel_left + panel.size().width;
+                    let inner_left = panel_left + 16.0;
+                    let inner_right = panel_right - 16.0;
+
+                    for id in [
+                        "WelcomeGuideModal::body-scroll",
+                        "WelcomeGuideModal::highlights-card",
+                        "WelcomeGuideModal::highlights-text",
+                        "WelcomeGuideModal::footer",
+                    ] {
+                        let el = ElementHandle::find_by_element_id(&app, id)
+                            .next()
+                            .unwrap_or_else(|| panic!("missing {id}"));
+                        let left = el.absolute_position().x;
+                        let right = left + el.size().width;
+                        assert!(
+                            left >= inner_left - 0.5 && right <= inner_right + 0.5,
+                            "step {step} scale {scale} rtl={rtl}: {id} ({left:.1}..{right:.1}) overflows modal padded bounds ({inner_left:.1}..{inner_right:.1})"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

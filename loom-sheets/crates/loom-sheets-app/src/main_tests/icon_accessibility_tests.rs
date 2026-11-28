@@ -195,7 +195,6 @@ fn every_sheets_icon_action_has_a_unique_name_and_useful_description_in_the_acce
     assert_eq!(
         declaring_files,
         [
-            "chart_header.slint",
             "inspector.slint",
             "inspector_rows.slint",
             "sheet_bars.slint"
