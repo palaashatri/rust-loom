@@ -153,7 +153,19 @@ def sheets_shape_label_errors(source: str, palettes: dict, minimum: float) -> li
 
     fills = {int(index): color.lower() for index, color in fill_branches}
 
-    for theme in ("light", "dark", "high-contrast"):
+    for theme in (
+        "light",
+        "dark",
+        "high-contrast",
+        "high-contrast-light",
+        "monokai-dark",
+        "monokai-light",
+        "solarized-dark",
+        "solarized-light",
+        "nord",
+        "catppuccin-mocha",
+        "catppuccin-latte",
+    ):
         palette = palettes[theme]
         foreground = palette["paper-ink"].lower()
         for index, background in sorted(fills.items()):
@@ -401,6 +413,9 @@ def toolbar_focus_outline_errors(desktop_ui: dict, tokens: dict, theme_source: s
 tokens = tomllib.loads(TOKEN_FILE.read_text(encoding="utf-8"))
 desktop_ui = tomllib.loads(DESKTOP_UI.read_text(encoding="utf-8"))
 theme_source = THEME_SOURCE.read_text(encoding="utf-8")
+themes_source_path = THEME_SOURCE.with_name("themes.slint")
+if themes_source_path.exists():
+    theme_source = theme_source + "\n" + themes_source_path.read_text(encoding="utf-8")
 try:
     toolbar_item_source = TOOLBAR_ITEM_SOURCE.read_text(encoding="utf-8")
     toolbar_focus_sources = {
@@ -431,7 +446,21 @@ else:
         errors.append("loom.toml a11y.contrast-body must be a finite number at least 4.5:1")
         configured_contrast = minimum_contrast
 contrast_floor = max(minimum_contrast, configured_contrast)
-for theme in ("light", "dark", "high-contrast"):
+ALL_THEMES = (
+    "light",
+    "dark",
+    "high-contrast",
+    "high-contrast-light",
+    "monokai-dark",
+    "monokai-light",
+    "solarized-dark",
+    "solarized-light",
+    "nord",
+    "catppuccin-mocha",
+    "catppuccin-latte",
+)
+
+for theme in ALL_THEMES:
     palette = tokens["palette"][theme]
     contract_palette = desktop_ui["palette"][theme]
     try:

@@ -32,6 +32,15 @@ pub struct LocalMenuLine {
     pub separator: bool,
 }
 
+fn has_supported_item(items: &[MenuItem], supported: &[&str]) -> bool {
+    items.iter().any(|item| match item {
+        MenuItem::Submenu(submenu) => has_supported_item(&submenu.items, supported),
+        _ => item
+            .id()
+            .is_some_and(|id| supported.contains(&id) && item.is_enabled()),
+    })
+}
+
 /// Project an installed menu bar into in-window menus.
 ///
 /// Only commands the application actually handles (`supported`) appear, and a
@@ -44,12 +53,7 @@ pub fn project_local_menu(
     let visible_menus: Vec<_> = menu_bar
         .menus
         .iter()
-        .filter(|menu| {
-            menu.items.iter().any(|item| {
-                item.id()
-                    .is_some_and(|id| supported.contains(&id) && item.is_enabled())
-            })
-        })
+        .filter(|menu| has_supported_item(&menu.items, supported))
         .collect();
     let labels = visible_menus
         .iter()
@@ -60,76 +64,96 @@ pub fn project_local_menu(
     for (menu_index, menu) in visible_menus.iter().enumerate() {
         let mut separator_pending = false;
         let mut menu_entries: Vec<LocalMenuLine> = Vec::new();
-        for item in &menu.items {
-            if item.id().is_some_and(|id| !supported.contains(&id)) {
-                continue;
-            }
-            let entry = match item {
-                MenuItem::Action {
-                    id,
-                    label,
-                    shortcut,
-                    enabled,
-                } => Some((id, label, shortcut, *enabled, false, false)),
-                MenuItem::Check {
-                    id,
-                    label,
-                    shortcut,
-                    enabled,
-                    checked,
-                } => Some((id, label, shortcut, *enabled, *checked, true)),
-                MenuItem::Radio {
-                    id,
-                    label,
-                    shortcut,
-                    enabled,
-                    selected,
-                    ..
-                } => Some((id, label, shortcut, *enabled, *selected, true)),
-                MenuItem::Separator => {
-                    separator_pending = !menu_entries.is_empty();
-                    None
-                }
-                MenuItem::Submenu(submenu) => {
-                    return Err(DesktopError::InvalidRequest(format!(
-                        "the in-window menu does not support nested menu {}",
-                        submenu.title
-                    )));
-                }
-            };
-            if let Some((id, label, shortcut, enabled, checked, checkable)) = entry {
-                if separator_pending {
-                    menu_entries.push(LocalMenuLine {
-                        menu_index: menu_index as i32,
-                        label: String::new(),
-                        command_id: String::new(),
-                        shortcut: String::new(),
-                        enabled: false,
-                        checked: false,
-                        checkable: false,
-                        separator: true,
-                    });
-                    separator_pending = false;
-                }
-                menu_entries.push(LocalMenuLine {
-                    menu_index: menu_index as i32,
-                    label: label.clone(),
-                    command_id: id.clone(),
-                    shortcut: shortcut
-                        .as_ref()
-                        .map(|shortcut| shortcut.display_string())
-                        .unwrap_or_default(),
-                    enabled,
-                    checked,
-                    checkable,
-                    separator: false,
-                });
-            }
-        }
+        flatten_menu_items(
+            menu_index,
+            &menu.items,
+            supported,
+            &mut menu_entries,
+            &mut separator_pending,
+        );
         entries.extend(menu_entries);
     }
 
     Ok((labels, entries))
+}
+
+fn flatten_menu_items(
+    menu_index: usize,
+    items: &[MenuItem],
+    supported: &[&str],
+    menu_entries: &mut Vec<LocalMenuLine>,
+    separator_pending: &mut bool,
+) {
+    for item in items {
+        if item.id().is_some_and(|id| !supported.contains(&id)) {
+            continue;
+        }
+        let entry = match item {
+            MenuItem::Action {
+                id,
+                label,
+                shortcut,
+                enabled,
+            } => Some((id, label, shortcut, *enabled, false, false)),
+            MenuItem::Check {
+                id,
+                label,
+                shortcut,
+                enabled,
+                checked,
+            } => Some((id, label, shortcut, *enabled, *checked, true)),
+            MenuItem::Radio {
+                id,
+                label,
+                shortcut,
+                enabled,
+                selected,
+                ..
+            } => Some((id, label, shortcut, *enabled, *selected, true)),
+            MenuItem::Separator => {
+                *separator_pending = !menu_entries.is_empty();
+                None
+            }
+            MenuItem::Submenu(submenu) => {
+                flatten_menu_items(
+                    menu_index,
+                    &submenu.items,
+                    supported,
+                    menu_entries,
+                    separator_pending,
+                );
+                None
+            }
+        };
+        if let Some((id, label, shortcut, enabled, checked, checkable)) = entry {
+            if *separator_pending {
+                menu_entries.push(LocalMenuLine {
+                    menu_index: menu_index as i32,
+                    label: String::new(),
+                    command_id: String::new(),
+                    shortcut: String::new(),
+                    enabled: false,
+                    checked: false,
+                    checkable: false,
+                    separator: true,
+                });
+                *separator_pending = false;
+            }
+            menu_entries.push(LocalMenuLine {
+                menu_index: menu_index as i32,
+                label: label.clone(),
+                command_id: id.clone(),
+                shortcut: shortcut
+                    .as_ref()
+                    .map(|shortcut| shortcut.display_string())
+                    .unwrap_or_default(),
+                enabled,
+                checked,
+                checkable,
+                separator: false,
+            });
+        }
+    }
 }
 
 /// Which in-window menu a key opens: Alt plus a letter, or `"F10"` for the

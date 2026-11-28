@@ -173,6 +173,14 @@ def runtime_palette_values(source: str, theme: str) -> dict[str, str]:
         "light": r"(?<![\w-])export\s+global\s+Theme\b\s*\{",
         "dark": r"(?<![\w-])export\s+global\s+ThemeDark\b\s*\{",
         "high-contrast": r"(?<![\w-])export\s+global\s+ThemeHighContrast\b\s*\{",
+        "high-contrast-light": r"(?<![\w-])export\s+global\s+ThemeHighContrastLight\b\s*\{",
+        "monokai-dark": r"(?<![\w-])export\s+global\s+ThemeMonokaiDark\b\s*\{",
+        "monokai-light": r"(?<![\w-])export\s+global\s+ThemeMonokaiLight\b\s*\{",
+        "solarized-dark": r"(?<![\w-])export\s+global\s+ThemeSolarizedDark\b\s*\{",
+        "solarized-light": r"(?<![\w-])export\s+global\s+ThemeSolarizedLight\b\s*\{",
+        "nord": r"(?<![\w-])export\s+global\s+ThemeNord\b\s*\{",
+        "catppuccin-mocha": r"(?<![\w-])export\s+global\s+ThemeCatppuccinMocha\b\s*\{",
+        "catppuccin-latte": r"(?<![\w-])export\s+global\s+ThemeCatppuccinLatte\b\s*\{",
     }
     if theme not in theme_scopes:
         raise ValueError(f"unknown runtime theme: {theme}")

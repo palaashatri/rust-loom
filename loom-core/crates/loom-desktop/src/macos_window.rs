@@ -43,6 +43,7 @@ mod platform {
     use objc2::{AnyThread, MainThreadMarker};
     use objc2_app_kit::{
         NSAppearance, NSAppearanceCustomization, NSAppearanceName,
+        NSAppearanceNameAccessibilityHighContrastAqua,
         NSAppearanceNameAccessibilityHighContrastDarkAqua, NSAppearanceNameAqua,
         NSAppearanceNameDarkAqua, NSApplication, NSColor, NSImage, NSTitlebarSeparatorStyle,
         NSView,
@@ -70,9 +71,57 @@ mod platform {
             },
             "high-contrast" => Chrome {
                 appearance: unsafe { NSAppearanceNameAccessibilityHighContrastDarkAqua },
-                red: 0.0,
-                green: 0.0,
-                blue: 0.0,
+                red: 0.067,
+                green: 0.078,
+                blue: 0.106,
+            },
+            "high-contrast-light" => Chrome {
+                appearance: unsafe { NSAppearanceNameAccessibilityHighContrastAqua },
+                red: 0.973,
+                green: 0.980,
+                blue: 0.988,
+            },
+            "monokai-dark" => Chrome {
+                appearance: unsafe { NSAppearanceNameDarkAqua },
+                red: 0.165,
+                green: 0.169,
+                blue: 0.141,
+            },
+            "monokai-light" => Chrome {
+                appearance: unsafe { NSAppearanceNameAqua },
+                red: 0.961,
+                green: 0.961,
+                blue: 0.953,
+            },
+            "solarized-dark" => Chrome {
+                appearance: unsafe { NSAppearanceNameDarkAqua },
+                red: 0.016,
+                green: 0.188,
+                blue: 0.231,
+            },
+            "solarized-light" => Chrome {
+                appearance: unsafe { NSAppearanceNameAqua },
+                red: 0.969,
+                green: 0.941,
+                blue: 0.863,
+            },
+            "nord" => Chrome {
+                appearance: unsafe { NSAppearanceNameDarkAqua },
+                red: 0.200,
+                green: 0.224,
+                blue: 0.278,
+            },
+            "catppuccin-mocha" => Chrome {
+                appearance: unsafe { NSAppearanceNameDarkAqua },
+                red: 0.129,
+                green: 0.129,
+                blue: 0.200,
+            },
+            "catppuccin-latte" => Chrome {
+                appearance: unsafe { NSAppearanceNameAqua },
+                red: 0.957,
+                green: 0.961,
+                blue: 0.973,
             },
             _ => Chrome {
                 appearance: unsafe { NSAppearanceNameAqua },
@@ -203,7 +252,7 @@ mod platform {
             );
             assert_eq!(
                 (contrast.red, contrast.green, contrast.blue),
-                (0.0, 0.0, 0.0)
+                (0.067, 0.078, 0.106)
             );
         }
     }

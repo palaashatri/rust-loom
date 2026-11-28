@@ -12,7 +12,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::settings_file;
-use crate::{CommandStateProjection, MenuItem};
+use crate::{CommandStateProjection, Menu, MenuItem};
 
 /// Settings file key that holds the appearance.
 const KEY: &str = "appearance";
@@ -30,17 +30,41 @@ pub enum Appearance {
     Light,
     /// Always dark.
     Dark,
-    /// Always high contrast.
+    /// Always high contrast (dark).
     HighContrast,
+    /// Always high contrast (light).
+    HighContrastLight,
+    /// Monokai Dark studio theme.
+    MonokaiDark,
+    /// Monokai Light studio theme.
+    MonokaiLight,
+    /// Solarized Dark studio theme.
+    SolarizedDark,
+    /// Solarized Light studio theme.
+    SolarizedLight,
+    /// Nord studio theme.
+    Nord,
+    /// Catppuccin Mocha studio theme.
+    CatppuccinMocha,
+    /// Catppuccin Latte studio theme.
+    CatppuccinLatte,
 }
 
 impl Appearance {
     /// Every choice, in menu order.
-    pub const ALL: [Appearance; 4] = [
+    pub const ALL: [Appearance; 12] = [
         Appearance::System,
         Appearance::Light,
         Appearance::Dark,
         Appearance::HighContrast,
+        Appearance::HighContrastLight,
+        Appearance::MonokaiDark,
+        Appearance::MonokaiLight,
+        Appearance::SolarizedDark,
+        Appearance::SolarizedLight,
+        Appearance::Nord,
+        Appearance::CatppuccinMocha,
+        Appearance::CatppuccinLatte,
     ];
 
     /// The stable name used in the settings file and by `--theme`.
@@ -50,6 +74,14 @@ impl Appearance {
             Appearance::Light => "light",
             Appearance::Dark => "dark",
             Appearance::HighContrast => "high-contrast",
+            Appearance::HighContrastLight => "high-contrast-light",
+            Appearance::MonokaiDark => "monokai-dark",
+            Appearance::MonokaiLight => "monokai-light",
+            Appearance::SolarizedDark => "solarized-dark",
+            Appearance::SolarizedLight => "solarized-light",
+            Appearance::Nord => "nord",
+            Appearance::CatppuccinMocha => "catppuccin-mocha",
+            Appearance::CatppuccinLatte => "catppuccin-latte",
         }
     }
 
@@ -65,6 +97,14 @@ impl Appearance {
             Appearance::Light => "view.appearance.light",
             Appearance::Dark => "view.appearance.dark",
             Appearance::HighContrast => "view.appearance.high_contrast",
+            Appearance::HighContrastLight => "view.appearance.high_contrast_light",
+            Appearance::MonokaiDark => "view.appearance.monokai_dark",
+            Appearance::MonokaiLight => "view.appearance.monokai_light",
+            Appearance::SolarizedDark => "view.appearance.solarized_dark",
+            Appearance::SolarizedLight => "view.appearance.solarized_light",
+            Appearance::Nord => "view.appearance.nord",
+            Appearance::CatppuccinMocha => "view.appearance.catppuccin_mocha",
+            Appearance::CatppuccinLatte => "view.appearance.catppuccin_latte",
         }
     }
 
@@ -82,17 +122,32 @@ impl Appearance {
             Appearance::Light => "Appearance: Light",
             Appearance::Dark => "Appearance: Dark",
             Appearance::HighContrast => "Appearance: High Contrast",
+            Appearance::HighContrastLight => "Appearance: High Contrast Light",
+            Appearance::MonokaiDark => "Appearance: Monokai Dark",
+            Appearance::MonokaiLight => "Appearance: Monokai Light",
+            Appearance::SolarizedDark => "Appearance: Solarized Dark",
+            Appearance::SolarizedLight => "Appearance: Solarized Light",
+            Appearance::Nord => "Appearance: Nord",
+            Appearance::CatppuccinMocha => "Appearance: Catppuccin Mocha",
+            Appearance::CatppuccinLatte => "Appearance: Catppuccin Latte",
         }
     }
 
-    /// The theme that is drawn: `"light"`, `"dark"` or `"high-contrast"`.
-    /// `System` follows the operating system.
+    /// The theme that is drawn. `System` follows the operating system.
     pub const fn resolve(self, system_is_dark: bool) -> &'static str {
         match self {
             Appearance::System if system_is_dark => "dark",
             Appearance::System | Appearance::Light => "light",
             Appearance::Dark => "dark",
             Appearance::HighContrast => "high-contrast",
+            Appearance::HighContrastLight => "high-contrast-light",
+            Appearance::MonokaiDark => "monokai-dark",
+            Appearance::MonokaiLight => "monokai-light",
+            Appearance::SolarizedDark => "solarized-dark",
+            Appearance::SolarizedLight => "solarized-light",
+            Appearance::Nord => "nord",
+            Appearance::CatppuccinMocha => "catppuccin-mocha",
+            Appearance::CatppuccinLatte => "catppuccin-latte",
         }
     }
 
@@ -109,20 +164,41 @@ impl Appearance {
     }
 }
 
-/// The separator and four radio rows that make up the appearance part of a
-/// View menu. `System` starts selected; the live choice is applied with
-/// [`project_checks`].
-pub fn menu_items() -> Vec<MenuItem> {
-    let mut items = vec![MenuItem::Separator];
-    items.extend(Appearance::ALL.into_iter().map(|choice| MenuItem::Radio {
+fn radio_item(choice: Appearance) -> MenuItem {
+    MenuItem::Radio {
         id: choice.command_id().to_string(),
         group: MENU_GROUP.to_string(),
         label: choice.label().to_string(),
         shortcut: None,
         enabled: true,
         selected: choice == Appearance::System,
-    }));
-    items
+    }
+}
+
+/// The separator and `Theme` submenu that make up the appearance part of a
+/// View menu. `System` starts selected; the live choice is applied with
+/// [`project_checks`].
+pub fn menu_items() -> Vec<MenuItem> {
+    let theme_items = vec![
+        radio_item(Appearance::System),
+        radio_item(Appearance::Light),
+        radio_item(Appearance::Dark),
+        MenuItem::Separator,
+        radio_item(Appearance::HighContrast),
+        radio_item(Appearance::HighContrastLight),
+        MenuItem::Separator,
+        radio_item(Appearance::MonokaiDark),
+        radio_item(Appearance::MonokaiLight),
+        radio_item(Appearance::SolarizedDark),
+        radio_item(Appearance::SolarizedLight),
+        radio_item(Appearance::Nord),
+        radio_item(Appearance::CatppuccinMocha),
+        radio_item(Appearance::CatppuccinLatte),
+    ];
+    vec![
+        MenuItem::Separator,
+        MenuItem::Submenu(Menu::new("Theme", theme_items)),
+    ]
 }
 
 /// Marks exactly the current choice as selected in a command projection.
@@ -322,7 +398,8 @@ mod tests {
     fn the_menu_rows_are_four_radios_and_checks_follow_the_choice() {
         let items = menu_items();
         assert!(matches!(items[0], MenuItem::Separator));
-        assert_eq!(items.len(), 5);
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&items[1], MenuItem::Submenu(sub) if sub.title == "Theme"));
         let bar = MenuBar::new([Menu::new("View", items)]);
         let mut projection = bar.command_state_projection();
         for current in Appearance::ALL {

@@ -18,70 +18,23 @@ import "fonts/Inter-BoldItalic.ttf";
 // no widget is instantiated.
 import { Palette as SystemPalette } from "std-widgets.slint";
 import { AppAccents } from "app-accents.slint";
-
-struct Palette {
-    canvas: color, canvas-alt: color, surface: color, surface-raised: color,
-    surface-sunken: color, chrome: color, panel: color, overlay: color,
-    ink: color, ink-secondary: color, ink-disabled: color,
-    accent: color, accent-hover: color, accent-pressed: color, accent-ink: color,
-    success: color, warning: color, danger: color, info: color,
-    border: color, border-strong: color, focus: color, selection: color,
-    selection-soft: color, danger-surface: color, shadow: color, scrim: color,
-    grid-major: color, grid-minor: color, paper: color, paper-ink: color,
-    paper-muted: color, paper-line: color, media-stage: color,
-    content-accent: color, content-accent-soft: color, content-cool: color,
-    content-cool-soft: color, meter-good: color, meter-warn: color,
-}
-
-struct TypeScale {
-    micro: length, caption: length, body: length, body-large: length,
-    title: length, heading: length, display: length, display-large: length,
-}
-
-struct Leading {
-    ui: length, caption: length, body: length, title: length,
-}
-
-struct Spacing {
-    xs: length, sm: length, md: length, lg: length,
-    xl: length, xxl: length, xxxl: length, xxxxl: length,
-}
-
-struct Motion {
-    instant-ms: int, fast-ms: int, standard-ms: int, deliberate-ms: int,
-    ease-out-x1: float, ease-out-y1: float, ease-out-x2: float, ease-out-y2: float,
-}
-
-struct Metrics {
-    control-height: length,
-    compact-control-height: length,
-    toolbar-height: length,
-    context-toolbar-height: length,
-    labeled-toolbar-min-height: length,
-    labeled-toolbar-max-height: length,
-    header-height: length,
-    panel-header-height: length,
-    status-height: length,
-    sheet-tab-height: length,
-    formula-bar-height: length,
-    icon-size: length,
-    icon-small: length,
-    focus-ring: length,
-    focus-offset: length,
-    radius-small: length,
-    radius-medium: length,
-    radius-large: length,
-}
-
-struct ThemeTokens {
-    palette: Palette,
-    typography: TypeScale,
-    leading: Leading,
-    space: Spacing,
-    motion: Motion,
-    metrics: Metrics,
-    reduced-motion: bool,
-}
+import {
+    Palette,
+    TypeScale,
+    Leading,
+    Spacing,
+    Motion,
+    Metrics,
+    ThemeTokens,
+    ThemeHighContrastLight,
+    ThemeMonokaiDark,
+    ThemeMonokaiLight,
+    ThemeSolarizedDark,
+    ThemeSolarizedLight,
+    ThemeNord,
+    ThemeCatppuccinMocha,
+    ThemeCatppuccinLatte,
+} from "themes.slint";
 
 export global Theme {
     private property <ThemeTokens> light-tokens: {
@@ -134,7 +87,9 @@ export global Theme {
     in-out property <ThemeTokens> tokens: light-tokens;
     in-out property <string> active-theme: "light";
     in-out property <string> application: "";
-    out property <color> control-accent: active-theme == "light" ? tokens.palette.accent-pressed : tokens.palette.accent;
+    out property <bool> is-high-contrast: active-theme == "high-contrast" || active-theme == "high-contrast-light";
+    out property <bool> is-dark: active-theme == "dark" || active-theme == "high-contrast" || active-theme == "monokai-dark" || active-theme == "solarized-dark" || active-theme == "nord" || active-theme == "catppuccin-mocha";
+    out property <color> control-accent: !is-dark ? tokens.palette.accent-pressed : tokens.palette.accent;
     // The user's choice: "system", "light", "dark" or "high-contrast". Hosts
     // set it together with `active-theme`; while it is "system", a change of
     // the operating system's preference re-resolves `active-theme` on its own.
@@ -189,8 +144,16 @@ export global Theme {
     function update-tokens() {
         tokens = active-theme == "dark" ? ThemeDark.tokens
             : active-theme == "high-contrast" ? ThemeHighContrast.tokens
+            : active-theme == "high-contrast-light" ? ThemeHighContrastLight.tokens
+            : active-theme == "monokai-dark" ? ThemeMonokaiDark.tokens
+            : active-theme == "monokai-light" ? ThemeMonokaiLight.tokens
+            : active-theme == "solarized-dark" ? ThemeSolarizedDark.tokens
+            : active-theme == "solarized-light" ? ThemeSolarizedLight.tokens
+            : active-theme == "nord" ? ThemeNord.tokens
+            : active-theme == "catppuccin-mocha" ? ThemeCatppuccinMocha.tokens
+            : active-theme == "catppuccin-latte" ? ThemeCatppuccinLatte.tokens
             : light-tokens;
-        if (active-theme != "high-contrast" && (application == "writer" || application == "sheets" || application == "present")) {
+        if ((active-theme == "light" || active-theme == "dark") && (application == "writer" || application == "sheets" || application == "present")) {
             let accent = AppAccents.for-application(application, active-theme == "dark");
             tokens.palette.accent = accent.accent;
             tokens.palette.accent-hover = accent.accent-hover;
@@ -256,20 +219,20 @@ export global ThemeDark {
 export global ThemeHighContrast {
     in-out property <ThemeTokens> tokens: {
         palette: {
-            canvas: #000000, canvas-alt: #000000, surface: #000000,
-            surface-raised: #161616, surface-sunken: #000000, chrome: #000000,
-            panel: #000000, overlay: #000000f2, ink: #ffffff,
-            ink-secondary: #ffffff, ink-disabled: #c8c8c8, accent: #ffd84d,
-            accent-hover: #ffe681, accent-pressed: #e7bd25, accent-ink: #000000,
-            success: #80ff80, warning: #ffbd52, danger: #ff7164, info: #80ccff,
-            border: #ffffff, border-strong: #ffffff, focus: #ffd84d,
-            selection: #ffd84d, selection-soft: #3a3200, danger-surface: #3d0d09,
-            shadow: #000000, scrim: #000000cc, grid-major: #ffffff,
-            grid-minor: #777777, paper: #ffffff, paper-ink: #000000,
-            paper-muted: #222222, paper-line: #000000, media-stage: #000000,
-            content-accent: #ffd84d, content-accent-soft: #ffffff,
-            content-cool: #003cff, content-cool-soft: #ffffff,
-            meter-good: #00ff66, meter-warn: #ffd84d,
+            canvas: #0a0b0f, canvas-alt: #080a0e, surface: #141821,
+            surface-raised: #1d2330, surface-sunken: #050608, chrome: #11141b,
+            panel: #0f1117, overlay: #141821f5, ink: #ffffff,
+            ink-secondary: #d4dceb, ink-disabled: #9ba5b8, accent: #6cb6ff,
+            accent-hover: #91caff, accent-pressed: #52a5ff, accent-ink: #061120,
+            success: #56e37a, warning: #ffca57, danger: #ff8378, info: #6cb6ff,
+            border: #7c8599, border-strong: #c7d0e0, focus: #8cc8ff,
+            selection: #6cb6ff, selection-soft: #16304f, danger-surface: #3d1214,
+            shadow: #00000099, scrim: #000000cc, grid-major: #8b95a8,
+            grid-minor: #485163, paper: #ffffff, paper-ink: #000000,
+            paper-muted: #222222, paper-line: #333b48, media-stage: #050608,
+            content-accent: #6cb6ff, content-accent-soft: #16304f,
+            content-cool: #4ee2b8, content-cool-soft: #0e3830,
+            meter-good: #56e37a, meter-warn: #ffca57,
         },
         typography: {
             micro: 10px, caption: 11px, body: 13px, body-large: 14px,

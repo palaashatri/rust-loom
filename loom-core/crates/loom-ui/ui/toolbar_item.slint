@@ -66,7 +66,7 @@ export component IconOverLabelToolbarItem inherits Rectangle {
         border-radius: max(0px, Theme.tokens.metrics.radius-medium - Theme.tokens.metrics.focus-offset);
         border-width: focus.has-focus ? Theme.tokens.metrics.focus-ring : root.checked ? 1px : 0px;
         border-color: focus.has-focus ? Theme.palette().focus
-            : root.checked ? (Theme.active-theme == "high-contrast" ? Theme.palette().accent : Theme.palette().accent.with-alpha(0.35))
+            : root.checked ? (Theme.is-high-contrast ? Theme.palette().accent : Theme.palette().accent.with-alpha(0.35))
             : transparent;
         background: transparent;
     }
