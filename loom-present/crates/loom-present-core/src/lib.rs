@@ -12,6 +12,7 @@ mod element_style;
 pub mod find_replace;
 pub mod group_lock;
 pub mod list_text;
+pub mod morph;
 mod pdf_export;
 mod pictures;
 mod pptx_export;
@@ -28,6 +29,10 @@ pub use arrange::{AlignMode, DistributeAxis};
 pub use dynamic_bg::{render_dynamic_frame, DynamicBackground, DynamicBgPreset};
 pub use find_replace::{find_matches, replace_all, replace_match, TextMatch};
 pub use list_text::*;
+pub use morph::{
+    compute_morph_plan, ease_in_out_cubic, interpolate_morph_frame, MorphElementPair,
+    MorphFrameItem, MorphItemKind, MorphPlan, MorphRect,
+};
 pub use pictures::{lock_aspect, ImageAsset, ImageFormat};
 pub use print_layout::{
     export_pdf_with_options, preview_print_pages, PaperSize, PrintLayout, PrintOptions,

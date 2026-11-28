@@ -476,7 +476,7 @@ fn colour_swatches_are_named_keyboard_operable_and_undoable_in_every_theme() {
         .iter()
         .position(|element| element.id == "cover-title")
         .expect("selected cover title");
-    let labels = [
+    let text_labels = [
         "Text colour Red",
         "Text colour Orange",
         "Text colour Green",
@@ -485,6 +485,8 @@ fn colour_swatches_are_named_keyboard_operable_and_undoable_in_every_theme() {
         "Text colour Gray",
         "Text colour Black",
         "Automatic text colour",
+    ];
+    let fill_labels = [
         "Fill Red",
         "Fill Orange",
         "Fill Green",
@@ -504,6 +506,7 @@ fn colour_swatches_are_named_keyboard_operable_and_undoable_in_every_theme() {
         ),
     ] {
         crate::appearance::choose(&session.app, appearance);
+        session.app.global::<ElementInk>().set_format_sub_tab(1);
         crate::keyboard_flow_tests::render(&session.app);
         assert!(
             ElementHandle::find_by_accessible_label(&session.app, "Selected element text")
@@ -511,7 +514,7 @@ fn colour_swatches_are_named_keyboard_operable_and_undoable_in_every_theme() {
                 .is_some(),
             "the selected text control exists in {theme}"
         );
-        for label in labels {
+        for label in text_labels {
             let button = ElementHandle::find_by_accessible_label(&session.app, label)
                 .next()
                 .unwrap_or_else(|| panic!("{label:?} is absent in {theme}"));
@@ -550,6 +553,23 @@ fn colour_swatches_are_named_keyboard_operable_and_undoable_in_every_theme() {
             "one undo restores the previous text colour in {theme}"
         );
 
+        // Switch to Format -> Style sub-tab for Fill swatches and focus the inspector.
+        session.app.global::<ElementInk>().set_format_sub_tab(0);
+        session.app.invoke_focus_editor();
+        crate::keyboard_flow_tests::render(&session.app);
+        crate::keyboard_flow_tests::press(&session.app, Key::F6);
+        crate::keyboard_flow_tests::press(&session.app, Key::F6);
+        crate::keyboard_flow_tests::render(&session.app);
+        for label in fill_labels {
+            let button = ElementHandle::find_by_accessible_label(&session.app, label)
+                .next()
+                .unwrap_or_else(|| panic!("{label:?} is absent in {theme}"));
+            assert_eq!(
+                button.accessible_role(),
+                Some(AccessibleRole::Button),
+                "{label:?} has button semantics in {theme}"
+            );
+        }
         focus_named(&session.app, "Fill Red");
         for _ in 0..3 {
             crate::keyboard_flow_tests::press(&session.app, Key::RightArrow);
@@ -603,6 +623,7 @@ fn geometry_requires_a_single_selected_object() {
         assert!(session.select_element("second", true));
     }
     refresh(&app, &state);
+    app.global::<ElementInk>().set_format_sub_tab(2);
     crate::keyboard_flow_tests::render(&app);
 
     assert!(ElementHandle::find_by_accessible_label(
@@ -611,6 +632,8 @@ fn geometry_requires_a_single_selected_object() {
     )
     .next()
     .is_some());
+    app.global::<ElementInk>().set_format_sub_tab(1);
+    crate::keyboard_flow_tests::render(&app);
     assert!(
         ElementHandle::find_by_accessible_label(
             &app,
@@ -679,6 +702,7 @@ fn geometry_uses_live_selection_when_selection_contains_stale_ids() {
         ),
     ]);
     app.set_show_inspector(true);
+    app.global::<ElementInk>().set_format_sub_tab(2);
 
     state.session.borrow_mut().selected_elements =
         vec!["first".to_string(), "stale-id".to_string()];
@@ -774,26 +798,20 @@ fn imported_morph_is_named_as_unsupported_and_not_offered_as_a_fade() {
     assert!(
         ElementHandle::find_by_accessible_label(
             &app,
-            "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it."
+            "Magic Move smoothly animates matching objects between slides during playback."
         )
         .next()
         .is_some(),
-        "an imported Morph must be named, not silently played as a fade"
+        "Morph displays Magic Move playback explanation"
     );
-    for label in ["None", "Dissolve", "Push"] {
+    for label in ["None", "Dissolve", "Push", "Morph"] {
         assert!(
             ElementHandle::find_by_accessible_label(&app, label)
                 .next()
                 .is_some(),
-            "the transition control still offers {label}"
+            "the transition control offers {label}"
         );
     }
-    assert!(
-        ElementHandle::find_by_accessible_label(&app, "Morph")
-            .next()
-            .is_none(),
-        "Morph must not be an enabled choice"
-    );
 }
 
 #[test]
@@ -808,6 +826,7 @@ fn geometry_units_are_visible_before_any_error() {
         80.0,
     )]);
     app.set_show_inspector(true);
+    app.global::<ElementInk>().set_format_sub_tab(2);
     select(&app, &state, "t");
     crate::keyboard_flow_tests::render(&app);
 

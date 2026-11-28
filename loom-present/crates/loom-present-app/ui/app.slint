@@ -199,7 +199,7 @@ export component PresentApp inherits Window {
     out property <float> transition-progress: root.reveal;
     property <float> reveal-eased: 1.0 - (1.0 - root.reveal) * (1.0 - root.reveal);
     changed active-slide-index => {
-        if root.is-preview-mode && (root.transition-index == 1 || root.transition-index == 2) {
+        if root.is-preview-mode && !Theme.tokens.reduced-motion && root.transition-index >= 1 && root.transition-index <= 3 {
             root.reveal = 0.0;
         }
     }
