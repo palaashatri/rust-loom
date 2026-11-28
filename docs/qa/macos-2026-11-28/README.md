@@ -74,13 +74,17 @@ Dated audit record for branch `macos_native_ui_polish` at commit `771c140b` on m
 - [ ] **PR Wave 1 — Critical UI & Logo Fixes:** Fix Present `format_section.slint:149-185` collapsed `B/I/U/S` glyphs, duplicate `A` glyph, duplicate slide count, and unreachable Slide Sorter; add `NSApplication::setApplicationIconImage` in `macos_window.rs` + `NSImage` in `loom-desktop/Cargo.toml`; fix `loom-present.png` squircle padding.
 - [ ] **PR Wave 2 — macOS Native Chrome & Shortcuts:** Unify titlebar/toolbar, wire `setDocumentEdited:`/`setRepresentedURL:`, replace `Ctrl+Alt+...` with `Cmd+Opt+...` in Writer Slint popovers, and add Cocoa text navigation bindings in `caret_keys.rs`.
 - [ ] **PR Wave 3 — Design Bible & Foundation Alignment:** Reconcile `Noto Sans` vs `Inter` (`tokens/loom.toml` vs `theme.slint`), differentiate light `surface-raised`, and migrate remaining legacy `toolkit.slint`/`font_picker.slint` usages.
-- [ ] **PR Wave 4 — Metal Backend & `PERF-01`:** Evaluate/enable `renderer-skia` (Metal) on macOS and close `PERF-01` native GPU/RSS review. (PR Wave 1 check: `loom-ui` does not expose `renderer-skia` feature and `Cargo.lock` remains on `renderer-femtovg` for `--locked --offline`.)
+- [ ] **PR Wave 4 — Metal Backend & `PERF-01`:** Evaluate/enable `renderer-skia` (Metal) on macOS and close `PERF-01` native GPU/RSS review. (PR Wave 8 offline probe: `loom-ui` now exposes opt-in `renderer-skia` and `renderer-femtovg-wgpu` features, but `cargo check -p loom-ui --features renderer-skia --offline` fails because `i-slint-backend-android-activity` / Skia dependencies are not in `Cargo.lock` offline cache; `default` remains on `renderer-femtovg` + `renderer-software`.)
 
 ## 7. Resumption State Tracker
 
 | Wave | Branch | Base | Status | Files Changed | PR URL |
 |---|---|---|---|---:|---|
-| PR Wave 1 | `macos-polish/1-foundation-logos-native` | `main` | `[ ]` | — | — |
-| PR Wave 2 | `macos-polish/2-writer-sheets-parity` | `main` | `[ ]` | — | — |
-| PR Wave 3 | `macos-polish/3-present-parity` | `main` | `[ ]` | — | — |
-| PR Wave 4 | `macos-polish/4-metal-perf` | `main` | `[ ]` | — | — |
+| PR Wave 1 | `macos-polish/1-foundation-logos-native` | `main` | `[x]` | — | PR #35 |
+| PR Wave 2 | `macos-polish/2-writer-sheets-parity` | `main` | `[x]` | — | PR #36 |
+| PR Wave 3 | `macos-polish/3-present-parity` | `main` | `[x]` | — | PR #37 |
+| PR Wave 4 | `macos-polish/4-metal-perf` | `main` | `[x]` | — | PR #38 |
+| PR Wave 5 | `macos-polish/5-themes-high-contrast-core` | `main` | `[x]` | — | PR #39 |
+| PR Wave 6 | `macos-polish/6-writer-sheets-themes-polish` | `macos-polish/5-themes-high-contrast-core` | `[x]` | — | PR #40 |
+| PR Wave 7 | `macos-polish/7-present-themes-polish` | `macos-polish/5-themes-high-contrast-core` | `[x]` | — | PR #41 |
+| PR Wave 8 | `macos-polish/8-macos-native-context-metal-dmg` | `macos-polish/5-themes-high-contrast-core` | `[ ]` | — | Pending |

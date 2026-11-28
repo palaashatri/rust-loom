@@ -1,0 +1,48 @@
+import { Theme } from "../theme.slint";
+export { Theme } from "../theme.slint";
+import { LoomFontPicker } from "../foundation.slint";
+
+export component FontPickerProbeWindow inherits Window {
+    width: 360px;
+    height: 360px;
+    background: Theme.palette().canvas;
+
+    in-out property <[string]> fonts: [
+        "Inter",
+        "SF Pro Text",
+        "Georgia",
+        "Menlo",
+        "JetBrains Mono",
+        "Helvetica Neue",
+        "Times New Roman",
+        "Courier New",
+        "Avenir",
+        "Futura",
+    ];
+    in-out property <string> selected-font: "Inter";
+    in-out property <string> last-search: "";
+    in-out property <bool> open: false;
+    in-out property <int> highlighted-index: 0;
+    in-out property <int> cancel-count: 0;
+    in-out property <int> select-count: 0;
+
+    picker := LoomFontPicker {
+        x: 20px;
+        y: 20px;
+        width: 240px;
+        fonts: root.fonts;
+        selected-font <=> root.selected-font;
+        open <=> root.open;
+        highlighted-index <=> root.highlighted-index;
+        font-selected(font) => {
+            root.selected-font = font;
+            root.select-count += 1;
+        }
+        search-changed(query) => {
+            root.last-search = query;
+        }
+        cancelled => {
+            root.cancel-count += 1;
+        }
+    }
+}

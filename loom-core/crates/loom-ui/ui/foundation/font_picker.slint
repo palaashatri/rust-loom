@@ -1,0 +1,466 @@
+// Loom font picker primitive: searchable, scrollable, keyboard-accessible font selector.
+//
+// Pure visual primitive consuming Theme tokens exclusively (zero hardcoded hexes,
+// zero app-local geometry). Supports RTL mirroring, bounded popup height,
+// search filtering callback, wheel/scrollbar scrolling, and full keyboard grammar
+// (Down/Up/PageDown/PageUp navigate, Return/Space open or commit, Escape dismisses).
+
+import { Theme } from "../theme.slint";
+import { Icon } from "../icons.slint";
+import { LoomSearchField } from "controls.slint";
+
+export component LoomFontPicker inherits Rectangle {
+    in property <[string]> fonts: [
+        "Inter",
+        "SF Pro Text",
+        "SF Pro Display",
+        "Helvetica Neue",
+        "Georgia",
+        "Menlo",
+        "SF Mono",
+        "JetBrains Mono",
+    ];
+    in-out property <string> selected-font: "Inter";
+    in-out property <string> search-query: "";
+    in-out property <bool> open: false;
+    in property <string> label: "Font family";
+    in property <string> search-placeholder: "Filter fonts…";
+    in property <string> empty-text: "No matching fonts";
+    in property <bool> enabled: true;
+    in property <length> max-popup-height: 260px;
+
+    callback font-selected(string);
+    callback search-changed(string);
+    callback cancelled();
+
+    in-out property <int> highlighted-index: 0;
+    public function grab-focus() { trigger-scope.focus(); }
+
+    private property <length> row-height: max(24px, Theme.scaled-control-height);
+    private property <length> content-height: root.fonts.length * root.row-height;
+    private property <length> list-max-height: max(
+        root.row-height,
+        root.max-popup-height - Theme.scaled-control-height - Theme.tokens.space.md * 3,
+    );
+    private property <length> list-height: root.fonts.length > 0
+        ? min(root.list-max-height, max(root.row-height, root.content-height))
+        : root.row-height;
+    private property <length> max-scroll: max(0px, root.content-height - root.list-height);
+    private property <length> scroll-y: 0px;
+    private property <int> page-rows: max(1, Math.floor(root.list-height / root.row-height) - 1);
+
+    min-height: Theme.scaled-control-height;
+    preferred-height: Theme.scaled-control-height;
+    min-width: 180px;
+    background: transparent;
+    accessible-role: none;
+
+    function select-font(font: string) {
+        root.selected-font = font;
+        root.open = false;
+        root.font-selected(font);
+        trigger-scope.focus();
+    }
+
+    function move-highlight(delta: int) {
+        if (root.fonts.length == 0) {
+            root.highlighted-index = -1;
+            return;
+        }
+        let next = clamp(root.highlighted-index + delta, 0, root.fonts.length - 1);
+        root.highlighted-index = next;
+        root.reveal-highlighted();
+    }
+
+    function reveal-highlighted() {
+        if (!root.open || root.highlighted-index < 0) {
+            return;
+        }
+        let top = root.highlighted-index * root.row-height;
+        let bottom = top + root.row-height;
+        if (top < -root.scroll-y) {
+            root.scroll-y = clamp(-top, -root.max-scroll, 0px);
+        } else if (bottom > -root.scroll-y + root.list-height) {
+            root.scroll-y = clamp(root.list-height - bottom, -root.max-scroll, 0px);
+        }
+    }
+
+    function dismiss() {
+        if (root.open) {
+            root.open = false;
+            root.cancelled();
+            trigger-scope.focus();
+        }
+    }
+
+    trigger-box := Rectangle {
+        width: parent.width;
+        height: Theme.scaled-control-height;
+        clip: true;
+        border-radius: Theme.tokens.metrics.radius-medium;
+        border-width: trigger-scope.has-focus ? Theme.tokens.metrics.focus-ring : 1px;
+        border-color: trigger-scope.has-focus ? Theme.palette().focus
+            : root.open ? Theme.palette().accent
+            : trigger-touch.has-hover && root.enabled ? Theme.palette().border-strong
+            : Theme.palette().border;
+        background: !root.enabled ? Theme.palette().surface-sunken
+            : root.open ? Theme.palette().selection-soft
+            : trigger-touch.has-hover ? Theme.palette().panel
+            : Theme.palette().surface-raised;
+
+        trigger-scope := FocusScope {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            accessible-role: combobox;
+            accessible-label: root.label;
+            accessible-value: root.selected-font;
+            accessible-expandable: true;
+            accessible-expanded: root.open;
+            accessible-action-default => {
+                if (root.enabled) {
+                    root.open = !root.open;
+                }
+            }
+
+            key-pressed(event) => {
+                if (!root.enabled) {
+                    return reject;
+                }
+                if (event.text == Key.DownArrow) {
+                    if (!root.open) {
+                        root.open = true;
+                        root.highlighted-index = root.fonts.length > 0 ? clamp(root.highlighted-index, 0, root.fonts.length - 1) : -1;
+                    } else {
+                        root.move-highlight(1);
+                    }
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    if (root.open) {
+                        root.move-highlight(-1);
+                        return accept;
+                    }
+                    return reject;
+                }
+                if (event.text == Key.PageDown && root.open) {
+                    root.move-highlight(root.page-rows);
+                    return accept;
+                }
+                if (event.text == Key.PageUp && root.open) {
+                    root.move-highlight(-root.page-rows);
+                    return accept;
+                }
+                if (event.text == Key.Return || event.text == Key.Space) {
+                    if (!root.open) {
+                        root.open = true;
+                        root.highlighted-index = root.fonts.length > 0 ? clamp(root.highlighted-index, 0, root.fonts.length - 1) : -1;
+                    } else if (root.highlighted-index >= 0 && root.highlighted-index < root.fonts.length) {
+                        root.select-font(root.fonts[root.highlighted-index]);
+                    }
+                    return accept;
+                }
+                if (event.text == Key.Escape && root.open) {
+                    root.dismiss();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        trigger-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+            enabled: root.enabled;
+            mouse-cursor: root.enabled ? pointer : default;
+            clicked => {
+                trigger-scope.focus();
+                root.open = !root.open;
+            }
+        }
+
+        if !Theme.rtl : HorizontalLayout {
+            padding-left: Theme.tokens.space.md;
+            padding-right: Theme.tokens.space.md;
+            spacing: Theme.tokens.space.sm;
+            cross-axis-alignment: center;
+
+            Text {
+                min-width: 0px;
+                text: root.selected-font;
+                color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                font-size: Theme.type.body;
+                font-family: root.selected-font == "" ? Theme.ui-font-family : root.selected-font;
+                vertical-alignment: center;
+                horizontal-alignment: left;
+                horizontal-stretch: 1;
+                overflow: elide;
+                accessible-role: none;
+            }
+
+            Icon {
+                size: Theme.tokens.metrics.icon-small;
+                icon: root.open ? "chevron-up" : "chevron-down";
+                tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+            }
+        }
+
+        if Theme.rtl : HorizontalLayout {
+            padding-left: Theme.tokens.space.md;
+            padding-right: Theme.tokens.space.md;
+            spacing: Theme.tokens.space.sm;
+            cross-axis-alignment: center;
+
+            Icon {
+                size: Theme.tokens.metrics.icon-small;
+                icon: root.open ? "chevron-up" : "chevron-down";
+                tint: root.enabled ? Theme.palette().ink-secondary : Theme.palette().ink-disabled;
+            }
+
+            Text {
+                min-width: 0px;
+                text: root.selected-font;
+                color: root.enabled ? Theme.palette().ink : Theme.palette().ink-disabled;
+                font-size: Theme.type.body;
+                font-family: root.selected-font == "" ? Theme.ui-font-family : root.selected-font;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                horizontal-stretch: 1;
+                overflow: elide;
+                accessible-role: none;
+            }
+        }
+    }
+
+    if root.open : popup := Rectangle {
+        x: 0px;
+        y: trigger-box.height + Theme.tokens.space.xs;
+        width: max(root.width, 220px);
+        height: min(root.max-popup-height, popup-layout.preferred-height);
+        clip: true;
+        background: Theme.palette().overlay;
+        border-width: 1px;
+        border-color: Theme.palette().border-strong;
+        border-radius: Theme.tokens.metrics.radius-large;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-x: 0px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: Theme.palette().shadow;
+        z: 100;
+        accessible-role: groupbox;
+        accessible-label: root.label + " picker";
+
+        FocusScope {
+            width: parent.width;
+            height: parent.height;
+            capture-key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.dismiss();
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.move-highlight(1);
+                    return accept;
+                }
+                if (event.text == Key.UpArrow) {
+                    root.move-highlight(-1);
+                    return accept;
+                }
+                if (event.text == Key.PageDown) {
+                    root.move-highlight(root.page-rows);
+                    return accept;
+                }
+                if (event.text == Key.PageUp) {
+                    root.move-highlight(-root.page-rows);
+                    return accept;
+                }
+                if (event.text == Key.Return) {
+                    if (root.highlighted-index >= 0 && root.highlighted-index < root.fonts.length) {
+                        root.select-font(root.fonts[root.highlighted-index]);
+                    }
+                    return accept;
+                }
+                return reject;
+            }
+
+            popup-layout := VerticalLayout {
+                padding: Theme.tokens.space.sm;
+                spacing: Theme.tokens.space.xs;
+
+                LoomSearchField {
+                    label: "Search fonts";
+                    placeholder: root.search-placeholder;
+                    value <=> root.search-query;
+                    edited(text) => {
+                        root.scroll-y = 0px;
+                        root.highlighted-index = root.fonts.length > 0 ? 0 : -1;
+                        root.search-changed(text);
+                    }
+                }
+
+                Rectangle {
+                    height: root.list-height;
+                    clip: true;
+                    accessible-role: list;
+                    accessible-label: root.label + " list";
+
+                    if root.fonts.length == 0 : Text {
+                        width: parent.width;
+                        height: parent.height;
+                        text: root.empty-text;
+                        font-size: Theme.type.body;
+                        color: Theme.palette().ink-secondary;
+                        vertical-alignment: center;
+                        horizontal-alignment: Theme.rtl ? right : left;
+                        accessible-role: text;
+                    }
+
+                    if root.fonts.length > 0 : TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        scroll-event(event) => {
+                            if (root.max-scroll > 0px) {
+                                root.scroll-y = clamp(
+                                    root.scroll-y + event.delta-y,
+                                    -root.max-scroll,
+                                    0px,
+                                );
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+
+                    scroller := Flickable {
+                        interactive: false;
+                        width: parent.width;
+                        height: parent.height;
+                        viewport-y <=> root.scroll-y;
+                        viewport-width: self.width;
+                        viewport-height: max(self.height, root.content-height);
+
+                        VerticalLayout {
+                            width: scroller.viewport-width;
+                            height: root.content-height;
+                            alignment: start;
+
+                            for font[idx] in root.fonts : Rectangle {
+                                height: root.row-height;
+                                border-radius: Theme.tokens.metrics.radius-small;
+                                border-width: idx == root.highlighted-index ? 1px : 0px;
+                                border-color: idx == root.highlighted-index ? Theme.palette().focus : transparent;
+                                background: idx == root.highlighted-index ? Theme.palette().selection-soft
+                                    : row-touch.has-hover ? Theme.palette().surface-sunken
+                                    : transparent;
+
+                                accessible-role: list-item;
+                                accessible-label: font;
+                                accessible-checkable: true;
+                                accessible-checked: font == root.selected-font;
+                                accessible-action-default => {
+                                    root.highlighted-index = idx;
+                                    root.select-font(font);
+                                }
+
+                                row-touch := TouchArea {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        root.highlighted-index = idx;
+                                        root.select-font(font);
+                                    }
+                                }
+
+                                if !Theme.rtl : HorizontalLayout {
+                                    padding-left: Theme.tokens.space.md;
+                                    padding-right: Theme.tokens.space.md;
+                                    spacing: Theme.tokens.space.sm;
+                                    cross-axis-alignment: center;
+
+                                    Rectangle {
+                                        width: Theme.tokens.metrics.icon-small;
+                                        height: Theme.tokens.metrics.icon-small;
+                                        background: transparent;
+                                        if font == root.selected-font : Icon {
+                                            size: Theme.tokens.metrics.icon-small;
+                                            icon: "check";
+                                            tint: Theme.palette().accent;
+                                        }
+                                    }
+
+                                    Text {
+                                        min-width: 0px;
+                                        text: font;
+                                        font-family: font;
+                                        font-size: Theme.type.body;
+                                        font-weight: font == root.selected-font ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: left;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                        accessible-role: none;
+                                    }
+                                }
+
+                                if Theme.rtl : HorizontalLayout {
+                                    padding-left: Theme.tokens.space.md;
+                                    padding-right: Theme.tokens.space.md;
+                                    spacing: Theme.tokens.space.sm;
+                                    cross-axis-alignment: center;
+
+                                    Text {
+                                        min-width: 0px;
+                                        text: font;
+                                        font-family: font;
+                                        font-size: Theme.type.body;
+                                        font-weight: font == root.selected-font ? 600 : 400;
+                                        color: Theme.palette().ink;
+                                        vertical-alignment: center;
+                                        horizontal-alignment: right;
+                                        horizontal-stretch: 1;
+                                        overflow: elide;
+                                        accessible-role: none;
+                                    }
+
+                                    Rectangle {
+                                        width: Theme.tokens.metrics.icon-small;
+                                        height: Theme.tokens.metrics.icon-small;
+                                        background: transparent;
+                                        if font == root.selected-font : Icon {
+                                            size: Theme.tokens.metrics.icon-small;
+                                            icon: "check";
+                                            tint: Theme.palette().accent;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.max-scroll > 0px : Rectangle {
+                        property <length> thumb-h: max(24px, (parent.height - 4px) * root.list-height / root.content-height);
+                        property <float> scroll-ratio: clamp(-scroller.viewport-y / root.max-scroll, 0.0, 1.0);
+                        property <length> thumb-y: 2px + (parent.height - 4px - self.thumb-h) * self.scroll-ratio;
+                        x: Theme.rtl ? 1px : parent.width - self.width - 1px;
+                        y: 0px;
+                        width: 6px;
+                        height: parent.height;
+                        background: transparent;
+
+                        Rectangle {
+                            x: 1px;
+                            y: parent.thumb-y;
+                            width: 4px;
+                            height: parent.thumb-h;
+                            border-radius: 2px;
+                            background: Theme.palette().ink-secondary;
+                            opacity: 0.55;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

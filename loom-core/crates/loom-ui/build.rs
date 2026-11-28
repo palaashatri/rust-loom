@@ -17,6 +17,7 @@ fn main() {
         "foundation/icon-grid.slint",
         "foundation/numeric_field_probe.slint",
         "foundation/local_menu_probe.slint",
+        "foundation/font_picker_probe.slint",
         "foundation/rtl-specimen.slint",
         "smoke.slint",
     ] {

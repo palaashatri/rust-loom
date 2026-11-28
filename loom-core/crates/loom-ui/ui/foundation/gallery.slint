@@ -10,6 +10,7 @@ import {
     LoomMenu, LoomPopover, LoomDialog,
     LoomTableRow, LoomEmptyState, LoomErrorState,
     LoomCanvasHandle, LoomTimelineRuler, LoomTimelineMarker,
+    LoomFontPicker,
 } from "../foundation.slint";
 import {
     GallerySection, ButtonsSection, FieldsSection, ChoiceSection, NavigationSection,
@@ -46,6 +47,8 @@ export component FoundationGallery inherits Window {
     in-out property <string> data-status: "No data action yet";
     in-out property <float> playhead-position: 0.35;
     in-out property <string> canvas-status: "Playhead at 35%";
+    in-out property <string> selected-font: "Inter";
+    in-out property <string> font-search: "";
 
     Rectangle {
         width: 100%;
@@ -165,6 +168,27 @@ export component FoundationGallery inherits Window {
                                 alignment <=> root.alignment;
                                 autosave <=> root.autosave;
                             }
+                            GallerySection {
+                                title: "Font Picker";
+                                detail: "Token-driven, searchable, scrollable, RTL-aware font selector";
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: start;
+                                    cross-axis-alignment: center;
+                                    LoomFontPicker {
+                                        width: 240px;
+                                        selected-font <=> root.selected-font;
+                                        search-query <=> root.font-search;
+                                    }
+                                    Text {
+                                        text: "Selected: " + root.selected-font;
+                                        font-size: Theme.type.caption;
+                                        color: Theme.palette().ink-secondary;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                }
+                            }
                             Rectangle { height: 1px; background: Theme.palette().border; }
                             NavigationSection { current-tab <=> root.current-tab; }
                             Rectangle { height: 1px; background: Theme.palette().border; }
@@ -196,6 +220,27 @@ export component FoundationGallery inherits Window {
                             ChoiceSection {
                                 alignment <=> root.alignment;
                                 autosave <=> root.autosave;
+                            }
+                            GallerySection {
+                                title: "Font Picker";
+                                detail: "Token-driven, searchable, scrollable, RTL-aware font selector";
+                                HorizontalLayout {
+                                    spacing: Theme.tokens.space.lg;
+                                    alignment: start;
+                                    cross-axis-alignment: center;
+                                    LoomFontPicker {
+                                        width: 240px;
+                                        selected-font <=> root.selected-font;
+                                        search-query <=> root.font-search;
+                                    }
+                                    Text {
+                                        text: "Selected: " + root.selected-font;
+                                        font-size: Theme.type.caption;
+                                        color: Theme.palette().ink-secondary;
+                                        vertical-alignment: center;
+                                    }
+                                    Rectangle { horizontal-stretch: 1; background: transparent; }
+                                }
                             }
                         }
 
