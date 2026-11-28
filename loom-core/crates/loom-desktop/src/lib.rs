@@ -14,8 +14,8 @@ use std::sync::Mutex;
 
 pub mod appearance;
 pub mod appearance_bindings;
-#[cfg(target_os = "macos")]
 pub mod macos_menu;
+pub use macos_menu::show_native_context_menu;
 #[cfg(target_os = "macos")]
 pub mod macos_window;
 #[cfg(not(target_os = "macos"))]

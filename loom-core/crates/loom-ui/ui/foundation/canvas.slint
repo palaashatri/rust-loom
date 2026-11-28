@@ -20,32 +20,42 @@ export component LoomCanvasHandle inherits Rectangle {
     callback nudged(int, int);
     callback picked();
 
-    width: Theme.tokens.space.md;
-    height: Theme.tokens.space.md;
-    border-radius: 1px;
-    border-width: handle-focus.has-focus ? 2px : 1px;
-    border-color: handle-focus.has-focus ? Theme.palette().focus
-        : root.selected ? Theme.palette().accent
-        : Theme.palette().border-strong;
-    background: !root.enabled ? Theme.palette().surface-sunken
-        : root.selected ? Theme.palette().accent
-        : handle-touch.pressed ? Theme.palette().surface-sunken
-        : handle-touch.has-hover ? Theme.palette().surface-raised
-        : Theme.palette().surface;
+    width: 24px;
+    height: 24px;
+    background: transparent;
     accessible-role: button;
     accessible-label: root.label;
     accessible-action-default => { if (root.enabled) { root.picked(); } }
 
     Rectangle {
-        x: (parent.width - Theme.tokens.space.xs) / 2;
-        y: (parent.height - Theme.tokens.space.xs) / 2;
-        width: Theme.tokens.space.xs;
-        height: Theme.tokens.space.xs;
-        border-radius: 0.5px;
-        background: root.selected ? Theme.palette().accent-ink : transparent;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        width: 10px;
+        height: 10px;
+        border-radius: 1px;
+        border-width: handle-focus.has-focus ? 2px : 1px;
+        border-color: handle-focus.has-focus ? Theme.palette().focus
+            : root.selected ? Theme.palette().accent
+            : Theme.palette().border-strong;
+        background: !root.enabled ? Theme.palette().surface-sunken
+            : root.selected ? Theme.palette().accent
+            : handle-touch.pressed ? Theme.palette().surface-sunken
+            : handle-touch.has-hover ? Theme.palette().surface-raised
+            : Theme.palette().surface;
+
+        Rectangle {
+            x: (parent.width - Theme.tokens.space.xs) / 2;
+            y: (parent.height - Theme.tokens.space.xs) / 2;
+            width: Theme.tokens.space.xs;
+            height: Theme.tokens.space.xs;
+            border-radius: 0.5px;
+            background: root.selected ? Theme.palette().accent-ink : transparent;
+        }
     }
 
     handle-focus := FocusScope {
+        width: parent.width;
+        height: parent.height;
         enabled: root.enabled;
         key-pressed(event) => {
             if (!root.enabled) { return reject; }
@@ -58,10 +68,10 @@ export component LoomCanvasHandle inherits Rectangle {
         }
     }
     handle-touch := TouchArea {
-        x: (parent.width - 20px) / 2;
-        y: (parent.height - 20px) / 2;
-        width: 20px;
-        height: 20px;
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
         enabled: root.enabled;
         clicked => { handle-focus.focus(); root.picked(); }
     }

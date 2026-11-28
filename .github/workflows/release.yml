@@ -859,10 +859,72 @@ jobs:
             refresh_release "$tag"
           }
 
+          publish_macos_dmgs() {
+            local tag="$1"
+            local nightly_sha="${2:-}"
+            local dmg_stage="$scratch_root/dmgs"
+            local -a found_dmgs=() staged_dmgs=() missing_dmgs=()
+            local dmg base arch target_name local_size remote_size
+            local asset_names_before_mutation asset_names_after_refresh
+            mkdir -p "$dmg_stage"
+
+            mapfile -t found_dmgs < <(find assets -maxdepth 3 -type f -name 'Loom-Creator-Suite-*.dmg' | LC_ALL=C sort)
+            [ "${#found_dmgs[@]}" -eq 2 ] || { echo "expected two macOS .dmg installers, found ${#found_dmgs[@]}" >&2; return 1; }
+
+            for dmg in "${found_dmgs[@]}"; do
+              [ -s "$dmg" ] || { echo "macOS installer ${dmg} is missing or empty" >&2; return 1; }
+              base="${dmg##*/}"
+              if [ -n "$nightly_sha" ]; then
+                arch="${base##*-}"
+                target_name="Loom-Creator-Suite-nightly-${nightly_sha}-${arch}"
+              else
+                target_name="$base"
+              fi
+              cp "$dmg" "$dmg_stage/$target_name"
+              staged_dmgs+=("$dmg_stage/$target_name")
+            done
+
+            asset_names_before_mutation="$(jq -r '.assets[].name' "$release_json" | LC_ALL=C sort)"
+            for dmg in "${staged_dmgs[@]}"; do
+              target_name="${dmg##*/}"
+              if ! asset_exists "$target_name"; then
+                missing_dmgs+=("$dmg")
+              fi
+            done
+
+            if ((${#missing_dmgs[@]} > 0)); then
+              refresh_release "$tag"
+              asset_names_after_refresh="$(jq -r '.assets[].name' "$release_json" | LC_ALL=C sort)"
+              [ "$asset_names_after_refresh" = "$asset_names_before_mutation" ] || {
+                echo "Release ${tag} asset inventory changed before .dmg upload; refusing asset mutation." >&2
+                return 1
+              }
+              [ "$(jq -r '.draft // false' "$release_json")" = "true" ] || {
+                echo "Release ${tag} must be a draft before uploading macOS .dmg installers." >&2
+                return 1
+              }
+              for dmg in "${missing_dmgs[@]}"; do
+                upload_asset "$dmg"
+              done
+            fi
+
+            refresh_release "$tag"
+            PUBLISHED_DMG_NAMES=()
+            for dmg in "${staged_dmgs[@]}"; do
+              target_name="${dmg##*/}"
+              asset_exists "$target_name" || { echo "release ${tag} is missing expected macOS installer ${target_name} after upload" >&2; return 1; }
+              local_size="$(wc -c < "$dmg" | tr -d ' ')"
+              remote_size="$(jq -r --arg name "$target_name" '.assets[] | select(.name == $name) | .size' "$release_json" | head -n 1)"
+              [ "$remote_size" = "$local_size" ] || { echo "release ${tag} asset ${target_name} size ${remote_size} does not match local size ${local_size}" >&2; return 1; }
+              PUBLISHED_DMG_NAMES+=("$target_name")
+            done
+          }
+
           publish_version_tag() {
             local tag="$1"
             local status is_draft
             local -a archives=(assets/loom-*)
+            local -a PUBLISHED_DMG_NAMES=()
             verify_tag_commit "$tag" "$GITHUB_SHA"
             if lookup_release_by_tag "$tag"; then
               status=0
@@ -872,13 +934,14 @@ jobs:
             case "$status" in
               0) ;;
               1)
-                create_draft_release "$tag" "$GITHUB_SHA" "Loom ${tag}" "Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. See README.txt inside each archive." false
+                create_draft_release "$tag" "$GITHUB_SHA" "Loom ${tag}" "Portable, unsigned builds of every Loom app and macOS .dmg installers from commit ${GITHUB_SHA}. See README.txt inside each archive." false
                 ;;
               *)
                 return 1
                 ;;
             esac
             prepare_release_asset_set "$tag" "$GITHUB_SHA" "SOURCE-COMMIT.txt" "SHA256SUMS.txt" false "${archives[@]}"
+            publish_macos_dmgs "$tag"
             verify_tag_commit "$tag" "$GITHUB_SHA"
             is_draft="$(jq -r '.draft // false' "$release_json")"
             if [ "$is_draft" = "true" ]; then
@@ -956,10 +1019,11 @@ jobs:
             local checksum_name="SHA256SUMS-nightly-${GITHUB_SHA}.txt"
             local release_status
             local -a archives=(assets/loom-nightly-${GITHUB_SHA}-*)
+            local -a PUBLISHED_DMG_NAMES=()
             local -a current_names=() old_names=()
             local name current keep
             local title="Loom nightly (${GITHUB_SHA::7})"
-            local notes="Portable, unsigned builds of every Loom app from commit ${GITHUB_SHA}. Unzip and run; see README.txt inside each archive."
+            local notes="Portable, unsigned builds of every Loom app and macOS .dmg installers from commit ${GITHUB_SHA}. Unzip and run, or install from the macOS .dmg; see README.txt inside each archive."
 
             [ "${#archives[@]}" -eq 6 ] || { echo "expected six current nightly archives, found ${#archives[@]}" >&2; return 1; }
             # A queued publisher may start after a newer push; reject an older
@@ -993,13 +1057,14 @@ jobs:
             [ "$(jq -r '.draft // false' "$release_json")" = "true" ] || { echo "Nightly release must be a draft before candidate assets are changed." >&2; return 1; }
 
             prepare_release_asset_set "$tag" "$source_sha" "$marker_name" "$checksum_name" true "${archives[@]}"
+            publish_macos_dmgs "$tag" "$source_sha"
             update_tag_ref "$tag" "$source_sha"
 
-            current_names=("${archives[@]##*/}" "$marker_name" "$checksum_name")
+            current_names=("${archives[@]##*/}" "${PUBLISHED_DMG_NAMES[@]}" "$marker_name" "$checksum_name")
             mapfile -t old_names < <(jq -r '.assets[].name' "$release_json")
             for name in "${old_names[@]}"; do
               case "$name" in
-                loom-nightly-*|SHA256SUMS-nightly-*.txt|SHA256SUMS.txt|LOOM-SOURCE-*.txt)
+                loom-nightly-*|Loom-Creator-Suite-*.dmg|SHA256SUMS-nightly-*.txt|SHA256SUMS.txt|LOOM-SOURCE-*.txt)
                   keep=false
                   for current in "${current_names[@]}"; do
                     if [ "$name" = "$current" ]; then keep=true; break; fi
