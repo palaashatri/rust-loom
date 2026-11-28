@@ -4,7 +4,7 @@ import {
 import { Theme } from "theme.slint";
 import { PresentTableInspector } from "table_inspector.slint";
 import { ElementInk } from "object_part.slint";
-import { PresentFormatSection } from "format_section.slint";
+import { PresentFormatSection, PresentStyleFillSection } from "format_section.slint";
 import { PresentArrangeSection } from "arrange_section.slint";
 import { PresentLayoutPicker } from "layout_picker.slint";
 import { PresentDocumentSection } from "document_section.slint";
@@ -131,6 +131,12 @@ export component PresentInspector inherits LoomPanel {
                             font-size: Theme.type.body;
                             color: Theme.palette().ink-secondary;
                         }
+                        if root.selection-count > 0 : LoomSegmentedControl {
+                            items: ["Style", "Text", "Arrange"];
+                            current <=> ElementInk.format-sub-tab;
+                            label: "Format Sections";
+                            selected(idx) => { ElementInk.format-sub-tab = idx; }
+                        }
                         if root.selection-count > 1 : InspectorHeading { title: "Selected Elements"; }
                         if root.selection-count > 1 : Text {
                             text: root.selection-count + " objects selected";
@@ -141,7 +147,7 @@ export component PresentInspector inherits LoomPanel {
                             accessible-role: AccessibleRole.text;
                             accessible-label: self.text;
                         }
-                        if root.selection-count > 1 && root.content-editable : Text {
+                        if root.selection-count > 1 && root.content-editable && ElementInk.format-sub-tab == 1 : Text {
                             text: "Select one object to edit its text content.";
                             wrap: word-wrap;
                             horizontal-alignment: Theme.rtl ? right : left;
@@ -150,7 +156,7 @@ export component PresentInspector inherits LoomPanel {
                             accessible-role: AccessibleRole.text;
                             accessible-label: self.text;
                         }
-                        if root.selection-count == 1 && root.content-editable : Rectangle {
+                        if root.selection-count == 1 && root.content-editable && ElementInk.format-sub-tab == 1 : Rectangle {
                             height: Theme.scaled-control-height;
                             border-radius: Theme.tokens.metrics.radius-small;
                             border-width: 1px;
@@ -174,9 +180,10 @@ export component PresentInspector inherits LoomPanel {
                                 }
                             }
                         }
-                        if root.selection-count > 0 && ElementInk.available : Rectangle { height: 1px; background: Theme.palette().border; }
-                        if root.selection-count > 0 && ElementInk.available : PresentFormatSection { }
-                        if root.selection-count > 0 : StyleEffectsPanel {
+                        // Format -> Style (0): Fill, Effects, Table styling
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 0 && ElementInk.available : Rectangle { height: 1px; background: Theme.palette().border; }
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 0 && ElementInk.available : PresentStyleFillSection { }
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 0 : StyleEffectsPanel {
                             has-selection: root.selection-count > 0;
                             opacity-pct: ElementInk.effects-opacity-pct;
                             corner-radius-px: ElementInk.effects-corner-radius-px;
@@ -191,7 +198,7 @@ export component PresentInspector inherits LoomPanel {
                             toggle-shadow => { ElementInk.effects-toggle-shadow(); }
                             toggle-gradient => { ElementInk.effects-toggle-gradient(); }
                         }
-                        if root.is-table : PresentTableInspector {
+                        if root.is-table && ElementInk.format-sub-tab == 0 : PresentTableInspector {
                             current-style-id: root.table-style-id;
                             header-row: root.table-header-row;
                             banded-rows: root.table-banded-rows;
@@ -200,14 +207,17 @@ export component PresentInspector inherits LoomPanel {
                             toggle-table-option(opt) => { root.toggle-table-option(opt); }
                             table-action(act) => { root.table-action(act); }
                         }
-                        if root.selection-count > 0 : Rectangle { height: 1px; background: Theme.palette().border; }
-                        if root.selection-count > 0 : PresentArrangeSection {
+                        // Format -> Text (1): Typography, B/I/U/S, alignment, text colour
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 1 && ElementInk.available : Rectangle { height: 1px; background: Theme.palette().border; }
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 1 && ElementInk.available : PresentFormatSection { }
+                        // Format -> Arrange (2): Z-order, Align, Distribute, Group/Lock, Geometry
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 2 : Rectangle { height: 1px; background: Theme.palette().border; }
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 2 : PresentArrangeSection {
                             selection-count: root.selection-count;
                         }
-                        if root.selection-count > 0 : Rectangle { height: 1px; background: Theme.palette().border; }
-                        if root.selection-count > 0 : InspectorHeading { title: "Geometry"; }
-                        if root.selection-count > 1 : InspectorHeading { title: "Selected Elements"; }
-                        if root.selection-count > 1 : Text {
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 2 : Rectangle { height: 1px; background: Theme.palette().border; }
+                        if root.selection-count > 0 && ElementInk.format-sub-tab == 2 : InspectorHeading { title: "Geometry"; }
+                        if root.selection-count > 1 && ElementInk.format-sub-tab == 2 : Text {
                             text: "Select one object to edit its geometry.";
                             font-size: Theme.type.caption;
                             color: Theme.palette().ink-secondary;
@@ -217,7 +227,7 @@ export component PresentInspector inherits LoomPanel {
                             accessible-role: AccessibleRole.text;
                             accessible-label: self.text;
                         }
-                        if root.selection-count == 1 : Text {
+                        if root.selection-count == 1 && ElementInk.format-sub-tab == 2 : Text {
                             text: "Type slide units, or add in, cm, mm or pt. Rotation accepts ° or deg.";
                             font-size: Theme.type.caption;
                             color: Theme.palette().ink-secondary;
@@ -227,7 +237,7 @@ export component PresentInspector inherits LoomPanel {
                             accessible-role: AccessibleRole.text;
                             accessible-label: self.text;
                         }
-                        if root.selection-count == 1 : HorizontalLayout {
+                        if root.selection-count == 1 && ElementInk.format-sub-tab == 2 : HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             for slot in 2 : HorizontalLayout {
                                 property <int> k: Theme.rtl ? 1 - slot : slot;
@@ -275,7 +285,7 @@ export component PresentInspector inherits LoomPanel {
                                 }
                             }
                         }
-                        if root.selection-count == 1 : HorizontalLayout {
+                        if root.selection-count == 1 && ElementInk.format-sub-tab == 2 : HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             for slot in 2 : HorizontalLayout {
                                 property <int> k: Theme.rtl ? 1 - slot : slot;
@@ -323,7 +333,7 @@ export component PresentInspector inherits LoomPanel {
                                 }
                             }
                         }
-                        if root.selection-count == 1 : HorizontalLayout {
+                        if root.selection-count == 1 && ElementInk.format-sub-tab == 2 : HorizontalLayout {
                             spacing: Theme.tokens.space.xs;
                             if !Theme.rtl : Text {
                                 text: "Rot";
@@ -368,7 +378,7 @@ export component PresentInspector inherits LoomPanel {
                         spacing: Theme.tokens.space.sm;
                         LoomSectionHeader { title: "Slide Transition"; }
                         transition-type-control := LoomSegmentedControl {
-                            items: ["None", "Dissolve", "Push"];
+                            items: ["None", "Dissolve", "Push", "Morph"];
                             current <=> root.transition-index;
                             label: "Transition Type";
                             selected(idx) => { root.set-transition(idx); }
@@ -382,7 +392,7 @@ export component PresentInspector inherits LoomPanel {
                             horizontal-stretch: 1;
                         }
                         if root.transition-index == 3 : Text {
-                            text: "This deck keeps Morph, but Loom playback does not support it. Choose another effect to replace it.";
+                            text: "Magic Move smoothly animates matching objects between slides during playback.";
                             font-size: Theme.type.caption;
                             color: Theme.palette().ink-secondary;
                             wrap: word-wrap;

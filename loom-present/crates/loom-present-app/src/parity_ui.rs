@@ -397,48 +397,78 @@ pub(crate) fn wire(app: &PresentApp, state: &Rc<GuiState>) {
 }
 
 pub(crate) fn select_prev_slide(app: &PresentApp, state: &Rc<GuiState>) {
-    let target = {
+    let (from_slide, target) = {
         let session = state.session.borrow();
         let index = session.document.active_index;
-        if app.get_is_preview_mode() {
+        let from = session.document.active_slide().cloned();
+        let next = if app.get_is_preview_mode() {
             loom_present_core::animations::prev_visible_slide(&session.document.slides, index)
         } else {
             index.checked_sub(1)
-        }
+        };
+        (from, next)
     };
     if let Some(target) = target {
-        let mut session = state.session.borrow_mut();
-        session.end_table_text_edit();
-        if session.document.select_slide(target) {
-            session.clear_selection();
-        }
-        drop(session);
+        let (to_slide, is_morph) = {
+            let mut session = state.session.borrow_mut();
+            session.end_table_text_edit();
+            if session.document.select_slide(target) {
+                session.clear_selection();
+            }
+            let to = session.document.active_slide().cloned();
+            let morph = to.as_ref().is_some_and(|s| {
+                session.transition_for(&s.id) == loom_present_core::TransitionKind::Morph
+            });
+            (to, morph)
+        };
         state.selected_element.set(0);
         refresh(app, state);
+        if app.get_is_preview_mode() && is_morph {
+            if let (Some(from), Some(to)) = (from_slide, to_slide) {
+                crate::morph_playback::start(app, state, from, to);
+            }
+        } else {
+            crate::morph_playback::cancel();
+        }
     }
 }
 
 pub(crate) fn select_next_slide(app: &PresentApp, state: &Rc<GuiState>) {
-    let target = {
+    let (from_slide, target) = {
         let session = state.session.borrow();
         let index = session.document.active_index;
-        if app.get_is_preview_mode() {
+        let from = session.document.active_slide().cloned();
+        let next = if app.get_is_preview_mode() {
             loom_present_core::animations::next_visible_slide(&session.document.slides, index)
         } else if index + 1 < session.document.len() {
             Some(index + 1)
         } else {
             None
-        }
+        };
+        (from, next)
     };
     if let Some(target) = target {
-        let mut session = state.session.borrow_mut();
-        session.end_table_text_edit();
-        if session.document.select_slide(target) {
-            session.clear_selection();
-        }
-        drop(session);
+        let (to_slide, is_morph) = {
+            let mut session = state.session.borrow_mut();
+            session.end_table_text_edit();
+            if session.document.select_slide(target) {
+                session.clear_selection();
+            }
+            let to = session.document.active_slide().cloned();
+            let morph = to.as_ref().is_some_and(|s| {
+                session.transition_for(&s.id) == loom_present_core::TransitionKind::Morph
+            });
+            (to, morph)
+        };
         state.selected_element.set(0);
         refresh(app, state);
+        if app.get_is_preview_mode() && is_morph {
+            if let (Some(from), Some(to)) = (from_slide, to_slide) {
+                crate::morph_playback::start(app, state, from, to);
+            }
+        } else {
+            crate::morph_playback::cancel();
+        }
     }
 }
 
@@ -674,11 +704,15 @@ pub(crate) fn handle_handle_moved(
                 (x, y, width, height),
                 matches!(
                     mode,
-                    crate::HandleKind::ResizeNorthWest | crate::HandleKind::ResizeSouthWest
+                    crate::HandleKind::ResizeNorthWest
+                        | crate::HandleKind::ResizeSouthWest
+                        | crate::HandleKind::ResizeWest
                 ),
                 matches!(
                     mode,
-                    crate::HandleKind::ResizeNorthWest | crate::HandleKind::ResizeNorthEast
+                    crate::HandleKind::ResizeNorthWest
+                        | crate::HandleKind::ResizeNorthEast
+                        | crate::HandleKind::ResizeNorth
                 ),
             );
         }

@@ -100,6 +100,8 @@ export global ElementInk {
     callback geometry-requested(string, string);
 
     // Extended style & mixed-value state
+    /// Active Format inspector sub-tab: 0 = Style, 1 = Text, 2 = Arrange.
+    in-out property <int> format-sub-tab: 1;
     in-out property <bool> underline: false;
     in-out property <bool> strikethrough: false;
     in-out property <bool> bold-mixed: false;

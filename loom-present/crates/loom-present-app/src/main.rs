@@ -323,9 +323,13 @@ enum HandleKind {
     #[default]
     Move,
     ResizeNorthWest,
+    ResizeNorth,
     ResizeNorthEast,
-    ResizeSouthWest,
+    ResizeEast,
     ResizeSouthEast,
+    ResizeSouth,
+    ResizeSouthWest,
+    ResizeWest,
     Rotate,
     Marquee,
 }
@@ -495,9 +499,13 @@ pub(crate) fn element_type_index(element_type: &ElementType) -> i32 {
 fn handle_kind(value: &str) -> HandleKind {
     match value {
         "nw" => HandleKind::ResizeNorthWest,
+        "n" => HandleKind::ResizeNorth,
         "ne" => HandleKind::ResizeNorthEast,
-        "sw" => HandleKind::ResizeSouthWest,
+        "e" => HandleKind::ResizeEast,
         "se" => HandleKind::ResizeSouthEast,
+        "s" => HandleKind::ResizeSouth,
+        "sw" => HandleKind::ResizeSouthWest,
+        "w" => HandleKind::ResizeWest,
         "rotate" => HandleKind::Rotate,
         _ => HandleKind::Move,
     }
@@ -586,6 +594,9 @@ fn resize_target(
     dx: f32,
     dy: f32,
 ) -> (f32, f32, f32, f32) {
+    const MIN_SIZE: f32 = 20.0;
+    let min_w = MIN_SIZE.min(element.width.max(1.0));
+    let min_h = MIN_SIZE.min(element.height.max(1.0));
     let right = element.x + element.width;
     let bottom = element.y + element.height;
     let mut x = element.x;
@@ -594,31 +605,31 @@ fn resize_target(
     let mut height = element.height;
     if matches!(
         handle,
-        HandleKind::ResizeNorthWest | HandleKind::ResizeSouthWest
+        HandleKind::ResizeNorthWest | HandleKind::ResizeSouthWest | HandleKind::ResizeWest
     ) {
-        x = (element.x + dx).min(right - 1.0);
+        x = (element.x + dx).min(right - min_w);
         width = right - x;
     }
     if matches!(
         handle,
-        HandleKind::ResizeNorthEast | HandleKind::ResizeSouthEast
+        HandleKind::ResizeNorthEast | HandleKind::ResizeSouthEast | HandleKind::ResizeEast
     ) {
-        width = (element.width + dx).max(1.0);
+        width = (element.width + dx).max(min_w);
     }
     if matches!(
         handle,
-        HandleKind::ResizeNorthWest | HandleKind::ResizeNorthEast
+        HandleKind::ResizeNorthWest | HandleKind::ResizeNorthEast | HandleKind::ResizeNorth
     ) {
-        y = (element.y + dy).min(bottom - 1.0);
+        y = (element.y + dy).min(bottom - min_h);
         height = bottom - y;
     }
     if matches!(
         handle,
-        HandleKind::ResizeSouthWest | HandleKind::ResizeSouthEast
+        HandleKind::ResizeSouthWest | HandleKind::ResizeSouthEast | HandleKind::ResizeSouth
     ) {
-        height = (element.height + dy).max(1.0);
+        height = (element.height + dy).max(min_h);
     }
-    (x, y, width.max(1.0), height.max(1.0))
+    (x, y, width.max(min_w), height.max(min_h))
 }
 
 fn resize_targets(
@@ -629,6 +640,15 @@ fn resize_targets(
     dy: f32,
 ) -> ((f32, f32, f32, f32), Vec<SnapGuide>) {
     let (x, y, width, height) = resize_target(element, handle, dx, dy);
+    if matches!(
+        handle,
+        HandleKind::ResizeNorth
+            | HandleKind::ResizeSouth
+            | HandleKind::ResizeEast
+            | HandleKind::ResizeWest
+    ) {
+        return ((x, y, width, height), Vec::new());
+    }
     let snap = calculate_smart_snapping(
         (x, y, width, height),
         &reference_bounds(session, std::slice::from_ref(element)),
@@ -2839,6 +2859,7 @@ fn wire_app_callbacks(app: &PresentApp, state: &Rc<GuiState>) {
                 let next = !app.get_is_preview_mode();
                 app.set_is_preview_mode(next);
                 if !next {
+                    morph_playback::cancel();
                     presenter::close();
                 }
             }
@@ -3021,6 +3042,8 @@ mod appearance;
 mod appearance_tests;
 mod clipboard_actions;
 mod command_dispatch;
+#[cfg(test)]
+mod creator_studio_tests;
 mod deck_guard;
 #[cfg(test)]
 mod dynamic_bg_tests;
@@ -3028,6 +3051,7 @@ mod dynamic_bg_view;
 mod find_replace_ui;
 mod font_picker;
 mod modal_wiring;
+mod morph_playback;
 mod print_preview;
 mod start_hub;
 mod welcome_guide;

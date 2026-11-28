@@ -1068,13 +1068,18 @@ fn slideshow_plays_the_arrival_slides_transition_and_the_editor_never_animates()
         assert!((settle(&app) - 1.0).abs() < f32::EPSILON, "{name} finishes");
     }
 
-    // Imported Morph stays recorded but plays as a cut until Loom supports it.
+    // Magic Move (Morph) animates in slideshow playback and finishes cleanly.
     app.set_transition_index(3);
     app.set_active_slide_index(4);
-    assert_eq!(
-        settle(&app),
-        1.0,
-        "unsupported Morph must not masquerade as a fade"
+    let morph_started = settle(&app);
+    assert!(
+        morph_started < 0.5,
+        "Morph starts near the beginning, got {morph_started}"
+    );
+    play_to_end(&app);
+    assert!(
+        (settle(&app) - 1.0).abs() < f32::EPSILON,
+        "Morph finishes cleanly"
     );
 
     // A slide with no transition appears at once.

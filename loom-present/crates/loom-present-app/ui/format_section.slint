@@ -236,6 +236,11 @@ export component PresentFormatSection inherits VerticalLayout {
         hex-submitted(val) => { ElementInk.hex-submitted("text", val); }
         close-requested => { ElementInk.color-toggled("text"); }
     }
+}
+
+/// Shape fill swatches and 48-color Shape Fill picker shown under Format -> Style.
+export component PresentStyleFillSection inherits VerticalLayout {
+    spacing: Theme.tokens.space.sm;
 
     StyleSwatchRow {
         chosen: ElementInk.fill-slot;

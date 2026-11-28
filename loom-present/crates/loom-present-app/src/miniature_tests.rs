@@ -275,13 +275,13 @@ fn the_slide_number_grows_with_text_scale() {
     for scale in [1.0f32, 2.0] {
         Theme::get(&s.app).set_text_scale(scale);
         let image = snapshot_component(&s.app, 1280.0, 800.0, SCALE).expect("render");
-        let row = thumbnail(&s.app, 0, 3);
+        let row = thumbnail(&s.app, 1, 3);
         // Inside the row's border, over the number column at its reading start.
         let (p, size) = (row.absolute_position(), row.size());
         let number = (
             ((p.x + 4.0) * SCALE) as u32,
             ((p.y + 4.0) * SCALE) as u32,
-            ((p.x + 32.0) * SCALE) as u32,
+            ((p.x + 56.0) * SCALE) as u32,
             ((p.y + size.height - 4.0) * SCALE) as u32,
         );
         heights.push(ink_height(&image, number));
